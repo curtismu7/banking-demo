@@ -1,0 +1,28 @@
+{
+  "version": 2,
+
+  "build": {
+    "env": {
+      "NODE_VERSION": "20",
+      "CI": "false",
+      "GENERATE_SOURCEMAP": "false"
+    }
+  },
+
+  "installCommand": "npm ci --prefix banking_api_server && npm ci --prefix banking_api_ui",
+  "buildCommand": "cd banking_api_ui && npm run build",
+  "outputDirectory": "banking_api_ui/build",
+
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/handler" }
+  ],
+
+  "headers": [
+    {
+      "source": "/api/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}

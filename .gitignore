@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+**/dist/
+**/build/
+
+# Environment files — never commit secrets
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Runtime
+*.pid
+*.sock
+.DS_Store
+
+# Config database (local SQLite — contains encrypted secrets)
+banking_api_server/data/persistent/config.db
+banking_api_server/data/persistent/config.db-shm
+banking_api_server/data/persistent/config.db-wal
+
+# Temporary test scripts
+banking_api_server/_test_*.js
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+langchain_agent/.venv/
+
+# Test coverage
+coverage/
+**/coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+.DS_Store
+Thumbs.db
+banking_api_server/data/persistent/
+.vercel

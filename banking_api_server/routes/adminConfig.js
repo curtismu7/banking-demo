@@ -1,0 +1,159 @@
+'use strict';
+
+/**
+ * /api/admin/config  — read/write app configuration.
+ *
+ * GET  /api/admin/config       → masked config (secrets replaced with ••••••••)
+ * POST /api/admin/config       → save one or more config keys
+ * POST /api/admin/config/test  → validate PingOne credentials by calling the
+ *                                discovery / token endpoint
+ * POST /api/admin/config/reset → wipe stored config (requires admin session)
+ *
+ * Security model:
+ *  • GET is open (returns masked data — no secret exposure).
+ *  • POST is open when no config is stored yet (first-run setup).
+ *  • POST is restricted to admin OAuth session once config exists.
+ *  • Reset always requires admin session.
+ */
+
+const express = require('express');
+const axios   = require('axios');
+const router  = express.Router();
+const configStore = require('../services/configStore');
+const { FIELD_DEFS, SECRET_KEYS } = require('../services/configStore');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function isAdminSession(req) {
+  return !!(req.session?.oauthUser?.role === 'admin' || req.session?.isAdmin);
+}
+
+/**
+ * Gate: allow request if (a) no config is stored yet, OR (b) caller is admin.
+ */
+function requireAdminOrUnconfigured(req, res, next) {
+  if (!configStore.isConfigured() || isAdminSession(req)) return next();
+  return res.status(401).json({
+    error:   'unauthorized',
+    message: 'Admin session required to update config once the app is configured.',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/config
+// ---------------------------------------------------------------------------
+
+router.get('/', async (req, res) => {
+  try {
+    await configStore.ensureInitialized();
+    res.json({
+      config:       configStore.getMasked(),
+      isConfigured: configStore.isConfigured(),
+      storageType:  process.env.KV_REST_API_URL ? 'vercel-kv' : 'sqlite',
+    });
+  } catch (err) {
+    console.error('[adminConfig] GET error:', err.message);
+    res.status(500).json({ error: 'config_read_error', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/config
+// ---------------------------------------------------------------------------
+
+router.post('/', requireAdminOrUnconfigured, async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data || typeof data !== 'object') {
+      return res.status(400).json({ error: 'invalid_body', message: 'JSON body required.' });
+    }
+
+    // Validate: only accept known keys
+    const filtered = {};
+    for (const key of Object.keys(FIELD_DEFS)) {
+      if (data[key] !== undefined) {
+        const val = String(data[key]).trim();
+        filtered[key] = val; // empty string = "leave unchanged" (setConfig skips empty)
+      }
+    }
+
+    await configStore.setConfig(filtered);
+
+    res.json({
+      ok:           true,
+      config:       configStore.getMasked(),
+      isConfigured: configStore.isConfigured(),
+    });
+  } catch (err) {
+    console.error('[adminConfig] POST error:', err.message);
+    res.status(500).json({ error: 'config_save_error', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/config/test  — test PingOne connection
+// ---------------------------------------------------------------------------
+
+router.post('/test', async (req, res) => {
+  try {
+    await configStore.ensureInitialized();
+
+    const envId   = configStore.getEffective('pingone_environment_id');
+    const region  = configStore.getEffective('pingone_region') || 'com';
+    const clientId = configStore.getEffective('admin_client_id');
+
+    if (!envId || !clientId) {
+      return res.status(400).json({
+        ok:    false,
+        error: 'missing_config',
+        message: 'Set at minimum pingone_environment_id and admin_client_id before testing.',
+      });
+    }
+
+    // Hit the OIDC discovery endpoint — no credentials required
+    const discoveryUrl = `https://auth.pingone.${region}/${envId}/as/.well-known/openid-configuration`;
+    const response = await axios.get(discoveryUrl, { timeout: 8000 });
+
+    res.json({
+      ok:        true,
+      issuer:    response.data.issuer,
+      endpoints: {
+        authorization: response.data.authorization_endpoint,
+        token:         response.data.token_endpoint,
+        userinfo:      response.data.userinfo_endpoint,
+        jwks:          response.data.jwks_uri,
+      },
+      message: 'PingOne environment reached successfully.',
+    });
+  } catch (err) {
+    const status = err.response?.status;
+    const isNotFound = status === 404;
+    res.status(200).json({
+      ok:      false,
+      error:   isNotFound ? 'environment_not_found' : 'connection_failed',
+      message: isNotFound
+        ? 'Environment ID not found — check pingone_environment_id and region.'
+        : `Failed to reach PingOne: ${err.message}`,
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/config/reset  — wipe all stored config (admin only)
+// ---------------------------------------------------------------------------
+
+router.post('/reset', async (req, res) => {
+  if (!isAdminSession(req)) {
+    return res.status(401).json({ error: 'unauthorized', message: 'Admin session required.' });
+  }
+  try {
+    await configStore.resetConfig();
+    res.json({ ok: true, message: 'Configuration cleared.' });
+  } catch (err) {
+    res.status(500).json({ error: 'reset_failed', message: err.message });
+  }
+});
+
+module.exports = router;
