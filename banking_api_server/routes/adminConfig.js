@@ -51,7 +51,7 @@ router.get('/', async (req, res) => {
     res.json({
       config:       configStore.getMasked(),
       isConfigured: configStore.isConfigured(),
-      storageType:  process.env.KV_REST_API_URL ? 'vercel-kv' : 'sqlite',
+      storageType:  configStore.getStorageType(),
     });
   } catch (err) {
     console.error('[adminConfig] GET error:', err.message);

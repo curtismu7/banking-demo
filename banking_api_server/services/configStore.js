@@ -25,7 +25,10 @@ const fs     = require('fs');
 // Constants
 // ---------------------------------------------------------------------------
 
-const USE_KV = !!process.env.KV_REST_API_URL; // Vercel KV
+// Vercel KV (managed) OR direct Upstash (via marketplace integration)
+const KV_URL   = process.env.KV_REST_API_URL   || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN  || process.env.UPSTASH_REDIS_REST_TOKEN;
+const USE_KV   = !!(KV_URL && KV_TOKEN);
 const KV_HASH_KEY = 'banking:config';
 
 // Fields that must be encrypted at rest
@@ -163,7 +166,8 @@ class ConfigStore {
   }
 
   async _loadFromKV() {
-    const { kv } = require('@vercel/kv');
+    const { createClient } = require('@vercel/kv');
+    const kv = createClient({ url: KV_URL, token: KV_TOKEN });
     const data = await kv.hgetall(KV_HASH_KEY);
     if (data) {
       for (const [key, value] of Object.entries(data)) {
@@ -208,7 +212,8 @@ class ConfigStore {
     if (Object.keys(updates).length === 0) return;
 
     if (USE_KV) {
-      const { kv } = require('@vercel/kv');
+      const { createClient } = require('@vercel/kv');
+      const kv = createClient({ url: KV_URL, token: KV_TOKEN });
       await kv.hset(KV_HASH_KEY, updates);
     } else {
       const db = _getSQLite();
@@ -282,7 +287,13 @@ class ConfigStore {
     return FIELD_DEFS[key]?.default || '';
   }
 
-  /** True if minimum viable config is present (environment_id + at least one client). */
+  /** 'vercel-kv', 'upstash-direct', or 'sqlite' */
+  getStorageType() {
+    if (USE_KV) return KV_URL?.includes('upstash.io') ? 'upstash-direct' : 'vercel-kv';
+    return 'sqlite';
+  }
+
+  /** True once the minimum required fields are stored. */
   isConfigured() {
     return !!(this.get('pingone_environment_id') && this.get('admin_client_id'));
   }
@@ -290,7 +301,8 @@ class ConfigStore {
   /** Reset only works if called with correct SESSION_SECRET (basic safety). */
   async resetConfig() {
     if (USE_KV) {
-      const { kv } = require('@vercel/kv');
+      const { createClient } = require('@vercel/kv');
+      const kv = createClient({ url: KV_URL, token: KV_TOKEN });
       await kv.del(KV_HASH_KEY);
     } else {
       const db = _getSQLite();
