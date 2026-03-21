@@ -73,7 +73,7 @@ describe('AuthorizationChallengeHandler', () => {
 
     it('should refresh expired tokens successfully', async () => {
       const expiredTokens: UserTokens = {
-        ...mockSession.userTokens!,
+        ...(mockSession.userTokens as UserTokens),
         issuedAt: new Date(Date.now() - 7200000) // 2 hours ago
       };
       const sessionWithExpiredTokens = { ...mockSession, userTokens: expiredTokens };
@@ -101,7 +101,7 @@ describe('AuthorizationChallengeHandler', () => {
 
     it('should require challenge when token refresh fails', async () => {
       const expiredTokens: UserTokens = {
-        ...mockSession.userTokens!,
+        ...(mockSession.userTokens as UserTokens),
         issuedAt: new Date(Date.now() - 7200000) // 2 hours ago
       };
       const sessionWithExpiredTokens = { ...mockSession, userTokens: expiredTokens };
@@ -130,7 +130,7 @@ describe('AuthorizationChallengeHandler', () => {
 
     it('should require challenge when insufficient scopes', async () => {
       const limitedScopeTokens: UserTokens = {
-        ...mockSession.userTokens!,
+        ...(mockSession.userTokens as UserTokens),
         scope: 'banking:transactions:read' // Missing banking:accounts:read
       };
       const sessionWithLimitedScopes = { ...mockSession, userTokens: limitedScopeTokens };

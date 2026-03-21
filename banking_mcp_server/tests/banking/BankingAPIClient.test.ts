@@ -122,7 +122,7 @@ describe('BankingAPIClient', () => {
 
     it('should successfully get user accounts', async () => {
       mockAxiosInstance.request.mockResolvedValue({
-        data: mockAccounts,
+        data: { accounts: mockAccounts },
         status: 200
       });
 
@@ -224,7 +224,7 @@ describe('BankingAPIClient', () => {
 
     it('should successfully get user transactions', async () => {
       mockAxiosInstance.request.mockResolvedValue({
-        data: mockTransactions,
+        data: { transactions: mockTransactions },
         status: 200
       });
 

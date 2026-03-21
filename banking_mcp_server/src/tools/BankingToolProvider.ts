@@ -86,6 +86,12 @@ export class BankingToolProvider {
         }
 
         console.log(`[BankingToolProvider] Authorization check passed for ${toolName}`);
+
+        // Re-fetch the session in case tokens were refreshed during the challenge check
+        const refreshedSession = await this.sessionManager.getSession(session.sessionId);
+        if (refreshedSession) {
+          session = refreshedSession;
+        }
       } else {
         console.log(`[BankingToolProvider] Tool ${toolName} does not require user authorization, skipping auth check`);
       }

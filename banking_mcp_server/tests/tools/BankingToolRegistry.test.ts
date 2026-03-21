@@ -9,14 +9,15 @@ describe('BankingToolRegistry', () => {
     it('should return all banking tools', () => {
       const tools = BankingToolRegistry.getAllTools();
       
-      expect(tools).toHaveLength(6);
+      expect(tools).toHaveLength(7);
       expect(tools.map(t => t.name)).toEqual([
         'get_my_accounts',
         'get_account_balance',
         'get_my_transactions',
         'create_deposit',
         'create_withdrawal',
-        'create_transfer'
+        'create_transfer',
+        'query_user_by_email'
       ]);
     });
 
@@ -69,7 +70,8 @@ describe('BankingToolRegistry', () => {
         'get_my_transactions',
         'create_deposit',
         'create_withdrawal',
-        'create_transfer'
+        'create_transfer',
+        'query_user_by_email'
       ]);
     });
   });
@@ -125,7 +127,7 @@ describe('BankingToolRegistry', () => {
     it('should return MCP-compatible tool definitions without handler property', () => {
       const mcpTools = BankingToolRegistry.getMCPToolDefinitions();
       
-      expect(mcpTools).toHaveLength(6);
+      expect(mcpTools).toHaveLength(7);
       
       mcpTools.forEach(tool => {
         expect(tool).toHaveProperty('name');
@@ -194,12 +196,17 @@ describe('BankingToolRegistry', () => {
   });
 
   describe('Tool Authentication Requirements', () => {
-    it('should require user authentication for all tools', () => {
-      const tools = BankingToolRegistry.getAllTools();
+    it('should require user authentication for banking operation tools', () => {
+      const authRequiredTools = ['get_my_accounts', 'get_account_balance', 'get_my_transactions', 'create_deposit', 'create_withdrawal', 'create_transfer'];
       
-      tools.forEach(tool => {
-        expect(tool.requiresUserAuth).toBe(true);
+      authRequiredTools.forEach(toolName => {
+        const tool = BankingToolRegistry.getTool(toolName);
+        expect(tool?.requiresUserAuth).toBe(true);
       });
+
+      // query_user_by_email is an admin/agent tool that does not require user auth
+      const queryTool = BankingToolRegistry.getTool('query_user_by_email');
+      expect(queryTool?.requiresUserAuth).toBe(false);
     });
 
     it('should have appropriate scopes for read operations', () => {

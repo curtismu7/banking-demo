@@ -125,7 +125,8 @@ describe('BankingToolProvider', () => {
         const result = await provider.executeTool('get_my_accounts', {}, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toContain('Found 1 account(s)');
+        const data = JSON.parse(result.text);
+        expect(data.count).toBe(1);
         expect(mockApiClient.getMyAccounts).toHaveBeenCalledWith('valid_access_token');
       });
     });
@@ -154,7 +155,7 @@ describe('BankingToolProvider', () => {
       it('should refresh expired tokens', async () => {
         // Create session with expired tokens
         const expiredTokens: UserTokens = {
-          ...mockSession.userTokens!,
+          ...(mockSession.userTokens as UserTokens),
           issuedAt: new Date(Date.now() - 7200000) // 2 hours ago
         };
         const sessionWithExpiredTokens = { ...mockSession, userTokens: expiredTokens };
@@ -165,10 +166,13 @@ describe('BankingToolProvider', () => {
           issuedAt: new Date()
         };
 
-        mockAuthManager.isTokenExpired.mockReturnValue(true);
+        mockAuthManager.isTokenExpired.mockImplementation((token: UserTokens) =>
+          token.accessToken !== 'new_access_token'
+        );
         mockAuthManager.refreshUserToken.mockResolvedValue(refreshedTokens);
         mockAuthManager.validateBankingScopes.mockReturnValue(true);
         mockSessionManager.associateUserTokens.mockResolvedValue();
+        mockSessionManager.getSession.mockResolvedValue({ ...sessionWithExpiredTokens, userTokens: [refreshedTokens] });
         mockApiClient.getMyAccounts.mockResolvedValue([]);
 
         const result = await provider.executeTool('get_my_accounts', {}, sessionWithExpiredTokens);
@@ -181,7 +185,7 @@ describe('BankingToolProvider', () => {
 
       it('should request new authorization when token refresh fails', async () => {
         const expiredTokens: UserTokens = {
-          ...mockSession.userTokens!,
+          ...(mockSession.userTokens as UserTokens),
           issuedAt: new Date(Date.now() - 7200000) // 2 hours ago
         };
         const sessionWithExpiredTokens = { ...mockSession, userTokens: expiredTokens };
@@ -207,7 +211,7 @@ describe('BankingToolProvider', () => {
 
       it('should reject insufficient scopes', async () => {
         const limitedScopeTokens: UserTokens = {
-          ...mockSession.userTokens!,
+          ...(mockSession.userTokens as UserTokens),
           scope: 'banking:transactions:read' // Missing banking:accounts:read
         };
         const sessionWithLimitedScopes = { ...mockSession, userTokens: limitedScopeTokens };
@@ -264,13 +268,14 @@ describe('BankingToolProvider', () => {
         const result = await provider.executeTool('get_my_accounts', {}, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toContain('Found 2 account(s)');
-        expect(result.text).toContain('Account ID: acc_123');
-        expect(result.text).toContain('Type: checking');
-        expect(result.text).toContain('Balance: $1000.50');
-        expect(result.text).toContain('Account ID: acc_456');
-        expect(result.text).toContain('Type: savings');
-        expect(result.text).toContain('Balance: $5000.00');
+        const data = JSON.parse(result.text);
+        expect(data.count).toBe(2);
+        expect(data.accounts[0].id).toBe('acc_123');
+        expect(data.accounts[0].type).toBe('checking');
+        expect(data.accounts[0].balance).toBe(1000.50);
+        expect(data.accounts[1].id).toBe('acc_456');
+        expect(data.accounts[1].type).toBe('savings');
+        expect(data.accounts[1].balance).toBe(5000.00);
       });
 
       it('should handle empty account list', async () => {
@@ -280,7 +285,9 @@ describe('BankingToolProvider', () => {
         const result = await provider.executeTool('get_my_accounts', {}, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toBe('No accounts found.');
+        const data = JSON.parse(result.text);
+        expect(data.count).toBe(0);
+        expect(data.accounts).toHaveLength(0);
       });
     });
 
@@ -292,7 +299,9 @@ describe('BankingToolProvider', () => {
         const result = await provider.executeTool('get_account_balance', { account_id: 'acc_123' }, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toBe('Account acc_123 balance: $1500.75');
+        const data = JSON.parse(result.text);
+        expect(data.accountId).toBe('acc_123');
+        expect(data.balance).toBe(1500.75);
         expect(mockApiClient.getAccountBalance).toHaveBeenCalledWith('valid_access_token', 'acc_123');
       });
     });
@@ -327,13 +336,14 @@ describe('BankingToolProvider', () => {
         const result = await provider.executeTool('get_my_transactions', {}, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toContain('Found 2 transaction(s)');
-        expect(result.text).toContain('Transaction ID: txn_123');
-        expect(result.text).toContain('Type: transfer');
-        expect(result.text).toContain('Amount: $100.00');
-        expect(result.text).toContain('From Account: acc_123');
-        expect(result.text).toContain('To Account: acc_456');
-        expect(result.text).toContain('Description: Monthly transfer');
+        const data = JSON.parse(result.text);
+        expect(data.count).toBe(2);
+        expect(data.transactions[0].id).toBe('txn_123');
+        expect(data.transactions[0].type).toBe('transfer');
+        expect(data.transactions[0].amount).toBe(100.00);
+        expect(data.transactions[0].fromAccountId).toBe('acc_123');
+        expect(data.transactions[0].toAccountId).toBe('acc_456');
+        expect(data.transactions[0].description).toBe('Monthly transfer');
       });
 
       it('should handle empty transaction list', async () => {
@@ -343,7 +353,9 @@ describe('BankingToolProvider', () => {
         const result = await provider.executeTool('get_my_transactions', {}, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toBe('No transactions found.');
+        const data = JSON.parse(result.text);
+        expect(data.count).toBe(0);
+        expect(data.transactions).toHaveLength(0);
       });
     });
 
@@ -372,11 +384,12 @@ describe('BankingToolProvider', () => {
         }, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toContain('Deposit successful!');
-        expect(result.text).toContain('Deposit created successfully');
-        expect(result.text).toContain('Transaction ID: txn_789');
-        expect(result.text).toContain('Amount: $250.00');
-        expect(result.text).toContain('Account: acc_123');
+        const data = JSON.parse(result.text);
+        expect(data.operation).toBe('deposit');
+        expect(data.message).toBe('Deposit created successfully');
+        expect(data.transaction.id).toBe('txn_789');
+        expect(data.amount).toBe(250.00);
+        expect(data.accountId).toBe('acc_123');
         expect(mockApiClient.createDeposit).toHaveBeenCalledWith(
           'valid_access_token',
           'acc_123',
@@ -409,11 +422,12 @@ describe('BankingToolProvider', () => {
         }, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toContain('Withdrawal successful!');
-        expect(result.text).toContain('Withdrawal created successfully');
-        expect(result.text).toContain('Transaction ID: txn_890');
-        expect(result.text).toContain('Amount: $150.00');
-        expect(result.text).toContain('Account: acc_123');
+        const data = JSON.parse(result.text);
+        expect(data.operation).toBe('withdrawal');
+        expect(data.message).toBe('Withdrawal created successfully');
+        expect(data.transaction.id).toBe('txn_890');
+        expect(data.amount).toBe(150.00);
+        expect(data.accountId).toBe('acc_123');
       });
     });
 
@@ -450,13 +464,14 @@ describe('BankingToolProvider', () => {
         }, mockSession);
         
         expect(result.success).toBe(true);
-        expect(result.text).toContain('Transfer successful!');
-        expect(result.text).toContain('Transfer completed successfully');
-        expect(result.text).toContain('Withdrawal Transaction ID: txn_901');
-        expect(result.text).toContain('Deposit Transaction ID: txn_902');
-        expect(result.text).toContain('Amount: $300.00');
-        expect(result.text).toContain('From: acc_123');
-        expect(result.text).toContain('To: acc_456');
+        const data = JSON.parse(result.text);
+        expect(data.operation).toBe('transfer');
+        expect(data.message).toBe('Transfer completed successfully');
+        expect(data.withdrawalTransaction.id).toBe('txn_901');
+        expect(data.depositTransaction.id).toBe('txn_902');
+        expect(data.amount).toBe(300.00);
+        expect(data.fromAccountId).toBe('acc_123');
+        expect(data.toAccountId).toBe('acc_456');
       });
     });
 

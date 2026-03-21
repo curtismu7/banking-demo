@@ -158,13 +158,16 @@ describe('AuthenticationIntegration', () => {
         issuedAt: new Date()
       };
 
-      mockSession.userTokens = mockUserTokens;
+      mockSession.userTokens = [mockUserTokens];
 
       mockSessionManager.validateSession.mockResolvedValue({
         isValid: true,
         requiresUserAuth: false,
         session: mockSession
       });
+      mockSessionManager.cleanupExpiredTokens.mockResolvedValue();
+      mockSessionManager.getSession.mockResolvedValue(mockSession);
+      mockSessionManager.findTokensForScopes.mockReturnValue(mockUserTokens);
 
       mockAuthManager.validateBankingScopes.mockReturnValue(true);
       mockAuthManager.isTokenExpired.mockReturnValue(false);
@@ -218,13 +221,18 @@ describe('AuthenticationIntegration', () => {
         issuedAt: new Date()
       };
 
-      mockSession.userTokens = mockUserTokens;
+      mockSession.userTokens = [mockUserTokens];
 
       mockSessionManager.validateSession.mockResolvedValue({
         isValid: true,
         requiresUserAuth: false,
         session: mockSession
       });
+      mockSessionManager.cleanupExpiredTokens.mockResolvedValue();
+      mockSessionManager.findTokensForScopes.mockReturnValue(null);
+      mockSessionManager.getSession
+        .mockResolvedValueOnce(mockSession) // after cleanupExpiredTokens
+        .mockResolvedValueOnce({ ...mockSession, userTokens: [mockRefreshedTokens] }); // after associateUserTokens
 
       mockAuthManager.validateBankingScopes.mockReturnValue(true);
       mockAuthManager.isTokenExpired.mockReturnValue(true);
@@ -234,7 +242,7 @@ describe('AuthenticationIntegration', () => {
       const result = await authIntegration.checkUserAuthorization(mockSession, ['banking:accounts:read']);
 
       expect(result.success).toBe(true);
-      expect(result.session?.userTokens).toBe(mockRefreshedTokens);
+      expect((result.session?.userTokens as UserTokens[])?.[0]).toBe(mockRefreshedTokens);
       expect(mockAuthManager.refreshUserToken).toHaveBeenCalledWith('refresh-token');
       expect(mockSessionManager.associateUserTokens).toHaveBeenCalledWith('test-session-1', mockRefreshedTokens);
     });
@@ -249,13 +257,17 @@ describe('AuthenticationIntegration', () => {
         issuedAt: new Date(Date.now() - 7200000)
       };
 
-      mockSession.userTokens = mockUserTokens;
+      mockSession.userTokens = [mockUserTokens];
 
       mockSessionManager.validateSession.mockResolvedValue({
         isValid: true,
         requiresUserAuth: false,
         session: mockSession
       });
+      mockSessionManager.cleanupExpiredTokens.mockResolvedValue();
+      mockSessionManager.findTokensForScopes.mockReturnValue(null);
+      mockSessionManager.getSession.mockResolvedValue(mockSession);
+      mockSessionManager.getValidScopes.mockReturnValue([]);
 
       mockAuthManager.validateBankingScopes.mockReturnValue(true);
       mockAuthManager.isTokenExpired.mockReturnValue(true);
@@ -274,7 +286,7 @@ describe('AuthenticationIntegration', () => {
       const result = await authIntegration.checkUserAuthorization(mockSession, ['banking:accounts:read']);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Token expired and refresh failed');
+      expect(result.error).toBe('Insufficient permissions');
       expect(result.authChallenge).toBe(mockAuthRequest);
     });
 
@@ -288,13 +300,17 @@ describe('AuthenticationIntegration', () => {
         issuedAt: new Date()
       };
 
-      mockSession.userTokens = mockUserTokens;
+      mockSession.userTokens = [mockUserTokens];
 
       mockSessionManager.validateSession.mockResolvedValue({
         isValid: true,
         requiresUserAuth: false,
         session: mockSession
       });
+      mockSessionManager.cleanupExpiredTokens.mockResolvedValue();
+      mockSessionManager.findTokensForScopes.mockReturnValue(null);
+      mockSessionManager.getSession.mockResolvedValue(mockSession);
+      mockSessionManager.getValidScopes.mockReturnValue([]);
 
       mockAuthManager.validateBankingScopes.mockReturnValue(false);
       mockAuthManager.isTokenExpired.mockReturnValue(false);
@@ -339,7 +355,7 @@ describe('AuthenticationIntegration', () => {
       const mockSession: BankingSession = {
         sessionId: 'test-session-1',
         agentTokenHash: 'test-hash',
-        userTokens: mockUserTokens,
+        userTokens: [mockUserTokens],
         createdAt: new Date(),
         lastActivity: new Date(),
         expiresAt: new Date(Date.now() + 3600000)
@@ -359,7 +375,11 @@ describe('AuthenticationIntegration', () => {
 
       expect(result.success).toBe(true);
       expect(result.session).toBe(mockSession);
-      expect(mockAuthManager.exchangeAuthorizationCode).toHaveBeenCalledWith('auth-code-123');
+      expect(mockAuthManager.exchangeAuthorizationCode).toHaveBeenCalledWith(
+        'auth-code-123',
+        expect.any(String),
+        undefined
+      );
       expect(mockSessionManager.associateUserTokens).toHaveBeenCalledWith('test-session-1', mockUserTokens);
       expect(mockAuthManager.completeAuthorizationRequest).toHaveBeenCalledWith('test-state');
     });
@@ -421,7 +441,7 @@ describe('AuthenticationIntegration', () => {
       const mockSession: BankingSession = {
         sessionId: 'test-session-1',
         agentTokenHash: 'test-hash',
-        userTokens: mockUserTokens,
+        userTokens: [mockUserTokens],
         createdAt: new Date(),
         lastActivity: new Date(),
         expiresAt: new Date(Date.now() + 3600000)
@@ -437,6 +457,9 @@ describe('AuthenticationIntegration', () => {
         requiresUserAuth: false,
         session: mockSession
       });
+      mockSessionManager.cleanupExpiredTokens.mockResolvedValue();
+      mockSessionManager.findTokensForScopes.mockReturnValue(mockUserTokens);
+      mockSessionManager.getSession.mockResolvedValue(mockSession);
       mockAuthManager.validateBankingScopes.mockReturnValue(true);
       mockAuthManager.isTokenExpired.mockReturnValue(false);
 
@@ -465,7 +488,7 @@ describe('AuthenticationIntegration', () => {
       const mockSession: BankingSession = {
         sessionId: 'test-session-1',
         agentTokenHash: 'test-hash',
-        userTokens: mockUserTokens,
+        userTokens: [mockUserTokens],
         createdAt: new Date(),
         lastActivity: new Date(),
         expiresAt: new Date(Date.now() + 3600000)
@@ -477,6 +500,7 @@ describe('AuthenticationIntegration', () => {
         requiresUserAuth: false,
         session: mockSession
       });
+      mockSessionManager.getValidScopes.mockReturnValue(['banking:accounts:read', 'banking:transactions:read']);
       mockAuthManager.isTokenExpired.mockReturnValue(false);
       mockAuthManager.getTokenLifetime.mockReturnValue(3600);
 

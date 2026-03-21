@@ -284,7 +284,8 @@ describe('MCPMessageHandler', () => {
       expect(mockToolProvider.executeTool).toHaveBeenCalledWith(
         'get_account_balance',
         { account_id: 'acc-123' },
-        mockSession
+        mockSession,
+        'test-agent-token'
       );
       expect(mockSessionManager.updateSessionActivity).toHaveBeenCalledWith(
         'test-session-1',
