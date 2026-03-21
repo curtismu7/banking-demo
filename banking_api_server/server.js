@@ -37,7 +37,11 @@ app.use(helmet());
 // In development the React CRA proxy makes requests same-origin, so CORS is
 // essentially unused. On Vercel, React and API share the same domain.
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || true,
+  // In production, CORS_ORIGIN should be set to the frontend URL.
+  // Fallback to false (block all cross-origin) rather than reflecting any Origin.
+  // The React CRA dev proxy makes requests same-origin in development, so this
+  // fallback only affects calls from a different origin without the env var set.
+  origin: process.env.CORS_ORIGIN || (isProduction ? false : 'http://localhost:3000'),
   credentials: true
 }));
 

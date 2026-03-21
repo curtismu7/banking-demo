@@ -129,31 +129,38 @@ router.get('/callback', async (req, res) => {
       console.log('Updated user:', user);
     }
 
-    // Store OAuth tokens directly in session (no JWT generation)
-    req.session.oauthTokens = {
+    // Regenerate session ID before storing OAuth tokens to prevent session fixation.
+    // Pre-capture the data we need to store, then assign after regeneration.
+    const oauthTokens = {
       accessToken: tokenData.access_token,
       idToken: tokenData.id_token || null,
       refreshToken: tokenData.refresh_token,
       expiresAt: Date.now() + (tokenData.expires_in * 1000),
       tokenType: tokenData.token_type || 'Bearer'
     };
-
-    // Determine client type from the original OAuth token
     const clientType = determineClientType(tokenData.access_token);
-    
-    // Store user and client type in session (no JWT token generation)
-    req.session.user = user;
-    req.session.clientType = clientType;
+    const authedUser = user;
+    const redirectOrigin = getOrigin(req);
 
-    // Save session before redirect to prevent race condition where status
-    // endpoint runs before session is persisted to the store
-    req.session.save((saveErr) => {
-      if (saveErr) {
-        console.error('Session save error:', saveErr);
-        return res.redirect(`${getOrigin(req)}/login?error=session_error`);
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error('Session regeneration error during OAuth callback:', regenErr);
+        return res.redirect(`${redirectOrigin}/login?error=session_error`);
       }
-      const adminUrl = process.env.FRONTEND_ADMIN_URL || `${getOrigin(req)}/admin`;
-      res.redirect(`${adminUrl}?oauth=success`);
+      req.session.oauthTokens = oauthTokens;
+      req.session.user = authedUser;
+      req.session.clientType = clientType;
+
+      // Save session before redirect to prevent race condition where status
+      // endpoint runs before session is persisted to the store
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('Session save error:', saveErr);
+          return res.redirect(`${redirectOrigin}/login?error=session_error`);
+        }
+        const adminUrl = process.env.FRONTEND_ADMIN_URL || `${redirectOrigin}/admin`;
+        res.redirect(`${adminUrl}?oauth=success`);
+      });
     });
   } catch (error) {
     console.error('OAuth callback error:', error);

@@ -26,18 +26,21 @@ router.post('/login', (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Store user in session instead of generating JWT token
-    req.session.user = user;
-    req.session.clientType = 'enduser';
-    req.session.tokenType = 'local_session';
-    
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    // Regenerate session ID on privilege elevation to prevent session fixation
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('Session regeneration error during login:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+      req.session.user = user;
+      req.session.clientType = 'enduser';
+      req.session.tokenType = 'local_session';
 
-    res.json({
-      message: 'Login successful',
-      user: userWithoutPassword,
-      sessionId: req.sessionID
+      const { password: _, ...userWithoutPassword } = user;
+      res.json({
+        message: 'Login successful',
+        user: userWithoutPassword
+      });
     });
 
   } catch (error) {
@@ -67,9 +70,9 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
-    // Validate password strength
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    // Validate password strength (NIST SP 800-63B: minimum 8 chars)
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
     }
 
     const hashedPassword = hashPassword(password);
@@ -84,19 +87,22 @@ router.post('/register', async (req, res) => {
     };
 
     const newUser = await dataStore.createUser(userData);
-    
-    // Store user in session instead of generating JWT token
-    req.session.user = newUser;
-    req.session.clientType = 'enduser';
-    req.session.tokenType = 'local_session';
-    
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = newUser;
 
-    res.status(201).json({
-      message: 'User registered successfully',
-      user: userWithoutPassword,
-      sessionId: req.sessionID
+    // Regenerate session ID on privilege elevation to prevent session fixation
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error('Session regeneration error during register:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+      req.session.user = newUser;
+      req.session.clientType = 'enduser';
+      req.session.tokenType = 'local_session';
+
+      const { password: _, ...userWithoutPassword } = newUser;
+      res.status(201).json({
+        message: 'User registered successfully',
+        user: userWithoutPassword
+      });
     });
 
   } catch (error) {

@@ -109,9 +109,9 @@ router.post('/', authenticateToken, requireScopes(['banking:write']), requireAdm
       return res.status(400).json({ error: 'Email already exists' });
     }
 
-    // Validate password strength
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    // Validate password strength (NIST SP 800-63B: minimum 8 chars)
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long' });
     }
 
     const hashedPassword = hashPassword(password);
@@ -160,8 +160,8 @@ router.put('/:userId', authenticateToken, requireScopes(['banking:write']), requ
 
     // If password is being updated, hash it
     if (updates.password) {
-      if (updates.password.length < 6) {
-        return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+      if (updates.password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters long' });
       }
       updates.password = hashPassword(updates.password);
     }

@@ -68,19 +68,18 @@ class ChatWebSocketHandler:
         """
         connection_id = str(uuid.uuid4())
 
-        # Extract token from WebSocket URL query string: ws://host/ws?token=xxx
-        user_token = None
-        try:
-            from urllib.parse import urlparse, parse_qs
-            raw_path = getattr(websocket, 'path', '') or ''
-            query_params = parse_qs(urlparse(raw_path).query)
-            user_token = query_params.get("token", [None])[0]
-            if user_token:
-                logger.info(f"Auth token received in WebSocket URL for connection {connection_id}")
-            else:
-                logger.debug(f"No auth token in WebSocket URL for connection {connection_id}")
-        except Exception as e:
-            logger.warning(f"Could not extract token from WebSocket URL: {e}")
+        # Security: do NOT extract auth tokens from the URL query string.
+        # URL query params are recorded in server access logs, browser history,
+        # and referrer headers — all of which can leak the token.
+        # Tokens must be passed in the first session_init message over the
+        # encrypted WebSocket channel instead.
+        raw_path = getattr(websocket, 'path', '') or ''
+        if '?token=' in raw_path or '&token=' in raw_path:
+            logger.warning(
+                f"Connection {connection_id} attempted to pass auth token in URL query string "
+                f"(insecure). Token in URL is ignored; send it via session_init message instead."
+            )
+        user_token = None  # resolved via session_init message
 
         try:
             # Register connection
