@@ -35,8 +35,8 @@
   bottom: 96px;
   right: 28px;
   z-index: 999;
-  width: 380px;
-  max-height: 580px;
+  width: 400px;
+  max-height: 760px;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -642,6 +642,20 @@
 .banking-agent-login-btn:hover {
   background: #0043ce;
   color: #fff;
+}
+
+.banking-agent-config-btn {
+  grid-column: 1 / -1;
+  background: #f4f4f4;
+  color: #525252;
+  border: 1px solid #e0e0e0;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.banking-agent-config-btn:hover {
+  background: #e8e8e8;
+  color: #161616;
 }
 
 /* ─── Responsive: full-width on very small screens ───────────────────── */

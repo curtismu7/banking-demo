@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getMyAccounts,
   getAccountBalance,
@@ -127,6 +128,7 @@ export default function BankingAgent({ user }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
+  const navigate = useNavigate();
 
   const isLoggedIn = !!user;
 
@@ -294,6 +296,13 @@ export default function BankingAgent({ user }) {
                     </button>
                   ))
               }
+              <button
+                className="banking-agent-action-btn banking-agent-config-btn"
+                onClick={() => { setIsOpen(false); navigate('/config'); }}
+                title="Open PingOne configuration settings"
+              >
+                ⚙️ Configure
+              </button>
             </div>
           )}
         </div>
