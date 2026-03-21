@@ -42,6 +42,13 @@
 
 ## 3. Bug Fix Log (reverse-chronological)
 
+### 2026-03-21 — /api/admin/config blocked by authenticateToken on Vercel (commit `57d2300`)
+- **Symptom:** `GET /api/admin/config` returned 401 on Vercel; Config page couldn't load existing settings
+- **Root cause:** `app.use('/api/admin', authenticateToken, adminRoutes)` was registered BEFORE `app.use('/api/admin/config', adminConfigRoutes)`. Express prefix matching caused all `/api/admin/*` requests (including `/api/admin/config`) to hit `authenticateToken` first.
+- **Fix:** Moved `adminConfigRoutes` registration ABOVE `adminRoutes`. Also added `app.set('trust proxy', 1)` (required for Vercel HTTPS session cookies) and changed `isAuthenticated` to `!!` boolean in both status routes.
+- **Files:** `banking_api_server/server.js`, `banking_api_server/routes/oauth.js`, `banking_api_server/routes/oauthUser.js`
+- **Regression check:** `GET /api/admin/config` without credentials must return 200 with masked config; `api/auth/oauth/status` must return `{"authenticated": false, ...}`
+
 ### 2026-03-21 — Chat panel too small; no way to reach /config from chat (commit `0ed4250`)
 - **Symptom:** Agent panel cramped at 580px; users had no in-chat path to the Config page
 - **Fix:** Increased panel to `max-height: 760px` / `width: 400px`; added "⚙️ Configure" button at bottom of action bar (all users, logged-in or not) — closes panel and navigates to `/config` via React Router
