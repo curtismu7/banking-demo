@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const oauthService = require('../services/oauthService');
+const configStore = require('../services/configStore');
 const dataStore = require('../data/store');
 const { determineClientType } = require('../middleware/auth');
 
@@ -10,6 +11,12 @@ const { determineClientType } = require('../middleware/auth');
  */
 router.get('/login', (req, res) => {
   try {
+    // Guard: redirect to config if PingOne credentials are not set
+    if (!configStore.isConfigured()) {
+      const frontendUrl = configStore.getEffective('frontend_url') || process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
+      return res.redirect(`${frontendUrl}/config?error=not_configured`);
+    }
+
     // Generate state parameter for CSRF protection
     const state = oauthService.generateState();
 
