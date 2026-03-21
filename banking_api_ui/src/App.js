@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import axios from 'axios';
 
 import Login from './components/Login';
+import BankingAgent from './components/BankingAgent';
 import Dashboard from './components/Dashboard';
 import UserDashboard from './components/UserDashboard';
 import ActivityLogs from './components/ActivityLogs';
@@ -162,7 +163,10 @@ function App() {
           <Route path="/config" element={<Config />} />
           <Route path="*" element={
             !user ? (
-              <Login />
+              <>
+                <Login />
+                <BankingAgent user={null} />
+              </>
             ) : (
               <main className="main-content">
                 <Routes>

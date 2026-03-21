@@ -104,12 +104,31 @@ function ActionForm({ action, onSubmit, onCancel, loading }) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
+// ─── Login actions (shown when not authenticated) ────────────────────────────
+
+const LOGIN_ACTIONS = [
+  { id: 'login_admin', label: '👑 Admin Login',    desc: 'Sign in as an administrator' },
+  { id: 'login_user',  label: '👤 Customer Login', desc: 'Sign in as a bank customer' },
+];
+
+function handleLoginAction(actionId) {
+  const apiUrl = process.env.REACT_APP_API_URL || window.location.origin;
+  const clientUrl = process.env.REACT_APP_CLIENT_URL || window.location.origin;
+  if (actionId === 'login_admin') {
+    window.location.href = `${apiUrl}/api/auth/oauth/login?redirect_uri=${encodeURIComponent(clientUrl + '/admin')}`;
+  } else {
+    window.location.href = `${apiUrl}/api/auth/oauth/user/login?redirect_uri=${encodeURIComponent(clientUrl + '/dashboard')}`;
+  }
+}
+
 export default function BankingAgent({ user }) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeAction, setActiveAction] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
+
+  const isLoggedIn = !!user;
 
   useEffect(() => {
     if (isOpen) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -200,7 +219,9 @@ export default function BankingAgent({ user }) {
               <span className="banking-agent-avatar">🏦</span>
               <div>
                 <div className="banking-agent-title">Banking Agent</div>
-                <div className="banking-agent-subtitle">Powered by MCP · {user?.name?.split(' ')[0] || 'Secure'}</div>
+                <div className="banking-agent-subtitle">
+                  {isLoggedIn ? `Powered by MCP · ${user.name?.split(' ')[0] || 'Secure'}` : 'How can I help you today?'}
+                </div>
               </div>
             </div>
             <button className="banking-agent-close-btn" onClick={() => setIsOpen(false)} aria-label="Close">✕</button>
@@ -210,7 +231,11 @@ export default function BankingAgent({ user }) {
           <div className="banking-agent-messages">
             {messages.length === 0 && (
               <div className="banking-agent-welcome">
-                <p>Select an action below to interact with your accounts via the MCP server.</p>
+                <p>
+                  {isLoggedIn
+                    ? 'Select an action below to interact with your accounts via the MCP server.'
+                    : 'Welcome to SecureBank. Please sign in to access your accounts.'}
+                </p>
               </div>
             )}
             {messages.map(msg => (
@@ -246,17 +271,29 @@ export default function BankingAgent({ user }) {
           {/* Action buttons */}
           {!activeAction && (
             <div className="banking-agent-actions">
-              {ACTIONS.map(a => (
-                <button
-                  key={a.id}
-                  className="banking-agent-action-btn"
-                  onClick={() => handleActionClick(a.id)}
-                  disabled={loading}
-                  title={a.desc}
-                >
-                  {a.label}
-                </button>
-              ))}
+              {isLoggedIn
+                ? ACTIONS.map(a => (
+                    <button
+                      key={a.id}
+                      className="banking-agent-action-btn"
+                      onClick={() => handleActionClick(a.id)}
+                      disabled={loading}
+                      title={a.desc}
+                    >
+                      {a.label}
+                    </button>
+                  ))
+                : LOGIN_ACTIONS.map(a => (
+                    <button
+                      key={a.id}
+                      className="banking-agent-action-btn banking-agent-login-btn"
+                      onClick={() => handleLoginAction(a.id)}
+                      title={a.desc}
+                    >
+                      {a.label}
+                    </button>
+                  ))
+              }
             </div>
           )}
         </div>

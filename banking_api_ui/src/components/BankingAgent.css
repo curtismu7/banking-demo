@@ -631,6 +631,19 @@
   cursor: not-allowed;
 }
 
+/* ─── Login action buttons (shown when not authenticated) ────────────── */
+.banking-agent-login-btn {
+  background: #0f62fe;
+  color: #fff;
+  font-weight: 600;
+  border: none;
+}
+
+.banking-agent-login-btn:hover {
+  background: #0043ce;
+  color: #fff;
+}
+
 /* ─── Responsive: full-width on very small screens ───────────────────── */
 @media (max-width: 420px) {
   .banking-agent-panel {
