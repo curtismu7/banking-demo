@@ -116,9 +116,10 @@ router.post('/test', async (req, res) => {
   try {
     await configStore.ensureInitialized();
 
-    const envId   = configStore.getEffective('pingone_environment_id');
-    const region  = configStore.getEffective('pingone_region') || 'com';
-    const clientId = configStore.getEffective('admin_client_id');
+    // Prefer values sent in the request body (allows testing before saving)
+    const envId    = req.body?.pingone_environment_id || configStore.getEffective('pingone_environment_id');
+    const region   = req.body?.pingone_region         || configStore.getEffective('pingone_region') || 'com';
+    const clientId = req.body?.admin_client_id        || configStore.getEffective('admin_client_id');
 
     if (!envId || !clientId) {
       return res.status(400).json({

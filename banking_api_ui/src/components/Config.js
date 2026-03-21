@@ -234,10 +234,15 @@ export default function Config() {
     setTesting(true);
     setTestResult(null);
     try {
-      const { data } = await axios.post('/api/admin/config/test');
+      // Send the current form values so the test works before saving
+      const { data } = await axios.post('/api/admin/config/test', {
+        pingone_environment_id: form.pingone_environment_id,
+        pingone_region:         form.pingone_region,
+        admin_client_id:        form.admin_client_id,
+      }, { headers: getConfigHeaders() });
       setTestResult(data);
     } catch (err) {
-      setTestResult({ ok: false, message: err.message });
+      setTestResult({ ok: false, message: err.response?.data?.message || err.message });
     } finally {
       setTesting(false);
     }
