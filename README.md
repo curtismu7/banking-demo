@@ -133,6 +133,54 @@ In your PingOne environment (`b9817c16-9910-4415-b67e-4ac687da74d9`), you need:
    - Subject token issuer: same PingOne environment
    - Requested audience: `banking_api_enduser`
 
+## MCP Security Gateway — Potential Architecture
+
+> **Note:** This is not how the app is currently set up. It illustrates how an **MCP Security Gateway** 
+> (as defined by Ping Identity) could be introduced to centralize identity enforcement between the 
+> Banking Agent and the Banking MCP Server — without changing either endpoint's code.
+
+```mermaid
+flowchart LR
+    subgraph Customer["🏦 Banking App Infrastructure"]
+        direction TB
+        GATEWAY["🔴 MCP Security Gateway\n(policy enforcement point)"]
+        MCP_SERVER["Banking MCP Server\n:8080\ntools: balance · transfer · transactions"]
+    end
+
+    subgraph PingCloud["☁️ Ping"]
+        PING["Ping Identity Platform\n(PingOne)\n• token validation\n• policy evaluation\n• step-up MFA decisions"]
+    end
+
+    BANKING_AGENT["🤖 Banking Agent\n(LangChain FAB)\n:8888"]
+
+    BANKING_AGENT -- "1. MCP tool call\n(access_token in header)" --> GATEWAY
+    GATEWAY -- "3. Forward validated\nrequest (adapted)" --> MCP_SERVER
+    MCP_SERVER -- "tool result" --> GATEWAY
+    GATEWAY -- "response" --> BANKING_AGENT
+    GATEWAY <-- "2. Enforce identity &\nsecurity rules\n(token introspect, policy eval,\nstep-up triggers)" --> PING
+
+    style GATEWAY fill:#c0392b,color:#fff,stroke:#922b21
+    style PING fill:#e8a0a0,color:#333,stroke:#c0392b
+    style BANKING_AGENT fill:#f0f0f0,stroke:#333
+    style MCP_SERVER fill:#f0f0f0,stroke:#333
+```
+
+**How it would work in practice:**
+
+| Step | Current (no gateway) | With MCP Security Gateway |
+|---|---|---|
+| 1. Agent calls MCP tool | Direct WebSocket to `:8080` | HTTPS call to gateway — MCP traffic intercepted |
+| 2. Identity enforcement | MCP server validates token itself | Gateway calls PingOne to validate token, evaluate policies, trigger step-up MFA |
+| 3. Downstream adaptation | Token passed as-is | Gateway can exchange token, strip/add claims, or adapt auth scheme for the MCP server |
+
+**Key benefits this would add to the banking demo:**
+- Centralised audit log of every MCP tool call
+- Policy-driven step-up MFA before high-risk tools (e.g. `transfer_funds`)
+- Token exchange at the gateway — MCP server never sees the user's raw token
+- Swap out the MCP server without changing agent auth logic
+
+---
+
 ## Environment Files
 
 | File | Purpose |

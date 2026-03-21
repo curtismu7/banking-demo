@@ -123,18 +123,60 @@ echo "🌐 Starting Banking UI on ${CLIENT_URL}..."
 ) &
 echo $! > "$PID_UI"
 
+# ── Banner ───────────────────────────────────────────────────────────────────
+# shellcheck disable=SC2034
+BOLD='\033[1m'
+CYAN='\033[1;36m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+MAGENTA='\033[1;35m'
+BLUE='\033[1;34m'
+WHITE='\033[1;37m'
+DIM='\033[2m'
+RESET='\033[0m'
+
 echo ""
+echo -e "${CYAN}${BOLD}*******************************************************************${RESET}"
+echo -e "${CYAN}${BOLD}*                                                                 *${RESET}"
+echo -e "${CYAN}${BOLD}*          🏦  BANKING DEMO — ALL SERVICES STARTED  🏦            *${RESET}"
+echo -e "${CYAN}${BOLD}*                                                                 *${RESET}"
+echo -e "${CYAN}${BOLD}*******************************************************************${RESET}"
 echo ""
-echo "✅ Banking services started:"
-echo "   Banking UI         : ${CLIENT_URL}"
-echo "   Banking API Server : ${API_URL}"
-echo "   Banking MCP Server : http://localhost:8080"
-echo "   LangChain Agent    : http://localhost:8888"
+echo -e "${WHITE}${BOLD}  ABOUT${RESET}"
+echo -e "${DIM}  PingOne-powered banking demo with OAuth 2.0 login, AI banking${RESET}"
+echo -e "${DIM}  agent (BankingAgent FAB), and MCP tool integration. Runs${RESET}"
+echo -e "${DIM}  alongside MasterFlow with no port conflicts.${RESET}"
 echo ""
-echo "   MasterFlow stays on :3000 / :3001 — no port conflicts"
+echo -e "${GREEN}${BOLD}  ┌─ URLS ──────────────────────────────────────────────────────┐${RESET}"
+echo -e "${GREEN}${BOLD}  │${RESET}  🌐  Banking UI (App)     ${YELLOW}${BOLD}${CLIENT_URL}${RESET}"
+echo -e "${GREEN}${BOLD}  │${RESET}  ⚙️   Banking UI (Config)  ${YELLOW}${BOLD}${CLIENT_URL}/config${RESET}"
+echo -e "${GREEN}${BOLD}  │${RESET}  🔐  Admin Login flow      ${YELLOW}${BOLD}${API_URL}/api/auth/oauth/login${RESET}"
+echo -e "${GREEN}${BOLD}  │${RESET}  👤  User Login flow       ${YELLOW}${BOLD}${API_URL}/api/auth/oauth/user/login${RESET}"
+echo -e "${GREEN}${BOLD}  └─────────────────────────────────────────────────────────────┘${RESET}"
 echo ""
-echo "📋 Logs (tail -f to watch):"
-echo "   tail -f /tmp/bank-api-server.log"
-echo "   tail -f /tmp/bank-ui.log"
+echo -e "${BLUE}${BOLD}  ┌─ PORTS ─────────────────────────────────────────────────────┐${RESET}"
+echo -e "${BLUE}${BOLD}  │${RESET}  ${MAGENTA}:${UI_PORT}${RESET}   Banking React UI     (CRA dev server)"
+echo -e "${BLUE}${BOLD}  │${RESET}  ${MAGENTA}:${API_PORT}${RESET}   Banking API Server   (Express)"
+echo -e "${BLUE}${BOLD}  │${RESET}  ${MAGENTA}:8080${RESET}  Banking MCP Server   (tool proxy)"
+echo -e "${BLUE}${BOLD}  │${RESET}  ${MAGENTA}:8888${RESET}  LangChain Agent      (Python FastAPI)"
+echo -e "${BLUE}${BOLD}  │${RESET}  ${DIM}:3000  MasterFlow UI      (not managed here)${RESET}"
+echo -e "${BLUE}${BOLD}  │${RESET}  ${DIM}:3001  MasterFlow API     (not managed here)${RESET}"
+echo -e "${BLUE}${BOLD}  └─────────────────────────────────────────────────────────────┘${RESET}"
 echo ""
-echo "ℹ️  To stop: bash run-bank.sh stop"
+echo -e "${MAGENTA}${BOLD}  ┌─ QUICK START ───────────────────────────────────────────────┐${RESET}"
+echo -e "${MAGENTA}${BOLD}  │${RESET}  1. Open ${YELLOW}${CLIENT_URL}/config${RESET} and enter PingOne credentials"
+echo -e "${MAGENTA}${BOLD}  │${RESET}  2. Open ${YELLOW}${CLIENT_URL}${RESET} — click ${WHITE}${BOLD}Login${RESET} to start an OAuth flow"
+echo -e "${MAGENTA}${BOLD}  │${RESET}  3. After login, use the 🤖 FAB (bottom-right) for BankingAgent"
+echo -e "${MAGENTA}${BOLD}  │${RESET}     • Ask: balance, accounts, transactions, withdraw, transfer"
+echo -e "${MAGENTA}${BOLD}  └─────────────────────────────────────────────────────────────┘${RESET}"
+echo ""
+echo -e "${WHITE}${BOLD}  ┌─ LOGS / DEBUG ──────────────────────────────────────────────┐${RESET}"
+echo -e "${WHITE}${BOLD}  │${RESET}  tail -f /tmp/bank-api-server.log"
+echo -e "${WHITE}${BOLD}  │${RESET}  tail -f /tmp/bank-ui.log"
+echo -e "${WHITE}${BOLD}  │${RESET}  tail -f /tmp/bank-mcp-server.log"
+echo -e "${WHITE}${BOLD}  └─────────────────────────────────────────────────────────────┘${RESET}"
+echo ""
+echo -e "${YELLOW}  ℹ️  UI takes ~20s to compile.  To stop: ${BOLD}bash run-bank.sh stop${RESET}"
+echo ""
+echo -e "${CYAN}${BOLD}*******************************************************************${RESET}"
+echo ""

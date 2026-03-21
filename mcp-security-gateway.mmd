@@ -1,0 +1,27 @@
+---
+title: MCP Security Gateway — Banking Demo (Potential Architecture)
+---
+flowchart LR
+    BANKING_AGENT["🤖 Banking Agent\n(LangChain FAB · :8888)"]
+
+    subgraph Customer["Customer Cloud"]
+        direction TB
+        GATEWAY["🔴 MCP\nGateway"]
+        MCP_SERVER["Banking MCP Server\n:8080\nbalance · transfer\ntransactions · accounts"]
+        GATEWAY <-->|"3. Adapt security to\ndownstream requirements"| MCP_SERVER
+    end
+
+    subgraph Ping["Ping"]
+        PING["Ping Identity Platform\n(PingOne)\ntoken validation · policy eval\nstep-up MFA · audit"]
+    end
+
+    BANKING_AGENT -->|"1. Intercept MCP traffic"| GATEWAY
+    GATEWAY -->|"response"| BANKING_AGENT
+    GATEWAY <-->|"2. Enforce identity and\nsecurity rules governed\nby the Ping platform"| PING
+
+    style GATEWAY fill:#c0392b,color:#fff,stroke:#922b21,font-weight:bold
+    style PING fill:#e8a0a0,color:#333,stroke:#c0392b
+    style BANKING_AGENT fill:#ffffff,stroke:#333
+    style MCP_SERVER fill:#ffffff,stroke:#333
+    style Customer stroke:#c0392b,stroke-width:2px,stroke-dasharray: 6 4,color:#333
+    style Ping stroke:#c0392b,stroke-width:2px,stroke-dasharray: 6 4,color:#333
