@@ -41,6 +41,11 @@ app.use(cors({
   credentials: true
 }));
 
+// Trust proxy headers from Vercel / any load balancer in front of Express.
+// Required so that req.secure is true on Vercel HTTPS connections and
+// session cookies with sameSite:'none'/secure:true are set correctly.
+app.set('trust proxy', 1);
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -122,6 +127,11 @@ app.get('/api/auth/logout', (req, res) => {
 });
 
 // API Routes
+// IMPORTANT: /api/admin/config MUST be registered before /api/admin so that
+// unauthenticated requests to the config endpoint are not blocked by the
+// authenticateToken middleware that guards the broader /api/admin/* prefix.
+app.use('/api/admin/config', adminConfigRoutes);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/auth/oauth', oauthRoutes);
 app.use('/api/auth/oauth/user', oauthUserRoutes);
@@ -129,9 +139,6 @@ app.use('/api/users', authenticateToken, userRoutes);
 app.use('/api/accounts', authenticateToken, accountRoutes);
 app.use('/api/transactions', authenticateToken, transactionRoutes);
 app.use('/api/admin', authenticateToken, adminRoutes);
-
-// Config API — handles its own auth (open for first-run setup)
-app.use('/api/admin/config', adminConfigRoutes);
 
 // Import OAuth health check and monitoring
 const { checkOAuthProviderHealth } = require('./middleware/oauthErrorHandler');
