@@ -9,7 +9,7 @@
     }
   },
 
-  "installCommand": "npm ci --prefix banking_api_server && npm ci --prefix banking_api_ui",
+  "installCommand": "npm install --prefix banking_api_server && npm install --prefix banking_api_ui",
   "buildCommand": "cd banking_api_ui && npm run build",
   "outputDirectory": "banking_api_ui/build",
 
