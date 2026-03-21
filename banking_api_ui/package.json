@@ -23,7 +23,9 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:api": "playwright test --config=playwright.api.config.js --reporter=list",
+    "test:e2e:agent": "playwright test tests/e2e/banking-agent.spec.js --reporter=list"
   },
   "devDependencies": {
     "@playwright/test": "^1.44.0"

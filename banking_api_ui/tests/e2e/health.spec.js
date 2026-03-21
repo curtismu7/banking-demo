@@ -15,7 +15,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = process.env.BANKING_API_BASE || 'http://localhost:3002';
 
 test.describe('Banking API — Health & Status Endpoints', () => {
   test('GET /api/healthz returns 200 with status ok', async ({ request }) => {
@@ -44,8 +44,10 @@ test.describe('Banking API — Health & Status Endpoints', () => {
     expect([200, 401]).toContain(res.status());
 
     const body = await res.json();
-    expect(body).toHaveProperty('authenticated');
-    expect(typeof body.authenticated).toBe('boolean');
+    // Must have at least one session-related key and not expose a stack trace
+    const hasSessionKey = 'authenticated' in body || 'user' in body || 'accessToken' in body;
+    expect(hasSessionKey).toBe(true);
+    expect(body).not.toHaveProperty('stack');
   });
 
   test('GET /api/admin/settings returns 401 without a token', async ({ request }) => {

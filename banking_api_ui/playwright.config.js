@@ -7,14 +7,22 @@
  *   npx playwright install chromium   (downloads browser binary)
  *
  * Run tests:
- *   npm run test:e2e              # headless
+ *   npm run test:e2e              # headless, expects UI on :3000
  *   npm run test:e2e:ui           # interactive UI mode
+ *   npm run test:e2e:api          # API-only tests (no browser/UI needed)
  *
- * Assumes banking_api_server is already running on http://localhost:3001
- * and banking_api_ui dev server starts automatically via webServer config.
+ * Port layouts:
+ *   Standard (start.sh)  → UI :3000, API :3001
+ *   run-bank.sh          → UI :4000, API :3002
+ *
+ * The UI port is controlled by BANKING_UI_PORT (default 3000).
+ * The API port is controlled by BANKING_API_BASE env var inside each spec.
  */
 
 const { defineConfig, devices } = require('@playwright/test');
+
+const UI_PORT = process.env.BANKING_UI_PORT || '3000';
+const UI_BASE = `http://localhost:${UI_PORT}`;
 
 module.exports = defineConfig({
   testDir: './tests/e2e',
@@ -31,7 +39,7 @@ module.exports = defineConfig({
   ],
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: UI_BASE,
 
     // Capture screenshots and traces on failure for debugging
     screenshot: 'only-on-failure',
@@ -50,11 +58,13 @@ module.exports = defineConfig({
     },
   ],
 
-  // Start the React dev-server if it's not already running
+  // Start the React dev-server if it's not already running on the expected port.
+  // reuseExistingServer: true means if something is already listening on that
+  // port (including another CRA instance or run-bank.sh), Playwright reuses it.
   webServer: {
     command: 'npm start',
-    url: 'http://localhost:3000',
-    reuseExistingServer: true, // don't restart if already running
-    timeout: 120_000, // CRA cold-start can take ~60 s
+    url: UI_BASE,
+    reuseExistingServer: true,  // never try to restart if already running
+    timeout: 120_000,           // CRA cold-start can take ~60 s
   },
 });
