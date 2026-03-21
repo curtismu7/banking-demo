@@ -14,7 +14,8 @@
   "outputDirectory": "banking_api_ui/build",
 
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/handler" }
+    { "source": "/api/:path*", "destination": "/api/handler" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
 
   "headers": [
