@@ -15,6 +15,8 @@
 | Session persistence | User logged out on every refresh | `server.js` (session middleware), `routes/oauth.js` `req.session.save()` |
 | Config UI / configStore | All PingOne settings lost | `services/configStore.js`, `routes/adminConfig.js` |
 | BankingAgent FAB | Agent disappears | `components/BankingAgent.js`, `App.js` |
+| Vercel SPA routing | All non-API routes 404 on Vercel | `vercel.json` (SPA catch-all rewrite) |
+| OAuth redirect origin | Redirects go to localhost in production | `routes/oauth.js`, `routes/oauthUser.js` (`getOrigin`) |
 | Vercel build | Production deployment fails | `banking_api_ui/package.json`, `vercel.json` |
 
 ---
@@ -39,6 +41,38 @@
 ---
 
 ## 3. Bug Fix Log (reverse-chronological)
+
+### 2026-03-21 — Chat panel too small; no way to reach /config from chat (commit `0ed4250`)
+- **Symptom:** Agent panel cramped at 580px; users had no in-chat path to the Config page
+- **Fix:** Increased panel to `max-height: 760px` / `width: 400px`; added "⚙️ Configure" button at bottom of action bar (all users, logged-in or not) — closes panel and navigates to `/config` via React Router
+- **Files:** `banking_api_ui/src/components/BankingAgent.js`, `banking_api_ui/src/components/BankingAgent.css`
+- **Regression check:** Open agent FAB → panel must be visibly taller; "⚙️ Configure" button visible at bottom; clicking it must navigate to `/config`
+
+### 2026-03-21 — All React client routes return 404 on Vercel (commit `4bb621a`)
+- **Symptom:** Navigating directly to `/config`, `/login`, `/dashboard` etc. on Vercel returned `404: NOT_FOUND`
+- **Root cause:** `vercel.json` `rewrites` only routed `/api/*` to the Express handler — all other paths fell through to Vercel CDN with no match
+- **Fix:** Added SPA catch-all rewrite `/((?!api/).*)` → `/index.html` so React Router handles client-side routes
+- **Files:** `vercel.json`
+- **Regression check:** Open `https://banking-demo-puce.vercel.app/config` directly — must load the Config page, not a 404
+
+### 2026-03-21 — Vercel OAuth redirects pointed to localhost:3000 (commit `dd9e76e`)
+- **Symptom:** On Vercel, every OAuth flow redirected the user to `localhost:3000/config?error=not_configured` or `localhost:3000/login?error=...`
+- **Root cause:** All redirect fallbacks in `oauth.js` and `oauthUser.js` hardcoded `'http://localhost:3000'`. On Vercel, `REACT_APP_CLIENT_URL` is not set so every redirect hit the fallback.
+- **Fix:** Added `getOrigin(req)` helper to both route files. Priority: `configStore.frontend_url` → `REACT_APP_CLIENT_URL` → `req.protocol + req.get('host')` (when `process.env.VERCEL`) → `localhost:3000` fallback. Replaced all 16 localhost hardcodes across both files.
+- **Files:** `banking_api_server/routes/oauth.js`, `banking_api_server/routes/oauthUser.js`
+- **Regression check:** On Vercel, clicking "Admin Login" must redirect back to `https://banking-demo-puce.vercel.app/...`, not `localhost`
+
+### 2026-03-21 — HTTPS + Invalid Host header for api.pingdemo.com (commit `b0da80d`)
+- **Symptom:** CRA dev server rejected requests with `Invalid Host header` at `http://api.pingdemo.com:4000/config`
+- **Fix:** Added `DANGEROUSLY_DISABLE_HOST_CHECK=true`, `HOST=0.0.0.0`, `WDS_SOCKET_PORT=0` to `banking_api_ui/.env`; generated mkcert certs in `Banking/certs/` (gitignored); Express server auto-detects certs and starts HTTPS; CRA uses `HTTPS=true` + `SSL_CRT_FILE`/`SSL_KEY_FILE`; LangChain uvicorn gets `--ssl-*` flags; `setupProxy.js` uses `https://` target when `REACT_APP_API_HTTPS=true`
+- **Files:** `banking_api_server/server.js`, `banking_api_ui/.env`, `banking_api_ui/src/setupProxy.js`, `run-bank.sh`, `.gitignore`
+- **Regression check:** `bash run-bank.sh` → console shows `Banking API server (HTTPS) running on https://api.pingdemo.com:3002`; browser shows padlock on `https://api.pingdemo.com:4000`
+
+### 2026-03-21 — run-bank.sh had no startup banner (commit `3a6549a`)
+- **Symptom:** After startup, no summary of URLs/ports was shown to the user
+- **Fix:** Added full ANSI color ASCII banner to `run-bank.sh` with URLS, PORTS, QUICK START, and LOGS sections. Also added MCP Security Gateway Mermaid diagram to `README.md` and standalone `mcp-security-gateway.mmd`
+- **Files:** `run-bank.sh`, `README.md`, `mcp-security-gateway.mmd`
+- **Regression check:** `bash run-bank.sh` — colored banner must appear after services start
 
 ### 2026-03-21 — Proxy mismatch → 500 on `/api/auth/oauth/status`
 - **Symptom:** Browser console shows `GET /api/auth/oauth/status 500` on startup
@@ -76,7 +110,10 @@ Before every `vercel --prod`:
 - [ ] User login flow works end-to-end: login → callback → `/dashboard`
 - [ ] BankingAgent FAB visible on login page with Admin/Customer login buttons
 - [ ] BankingAgent FAB shows banking actions after login (Accounts, Balance, Transfer, etc.)
+- [ ] BankingAgent "⚙️ Configure" button navigates to `/config`
 - [ ] Config UI at `/config` loads and saves PingOne credentials
+- [ ] Direct navigation to `/config`, `/login`, `/dashboard` on Vercel returns page (not 404)
+- [ ] OAuth callback redirects to Vercel hostname — not localhost
 - [ ] MCP tool calls succeed (Accounts, Transactions, Balance via agent chat)
 
 ---
