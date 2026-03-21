@@ -25,7 +25,7 @@ const EMPTY_FORM = {
   user_role: 'customer',
   session_secret: '',
   frontend_url: '',
-  mcp_server_url: 'http://localhost:8000',
+  mcp_server_url: '',           // populated from saved config; not defaulted to localhost
   debug_oauth: 'false',
   // PingOne Authorize
   authorize_enabled: 'false',
@@ -553,14 +553,41 @@ export default function Config() {
             <div className="card-header">
               <h2 className="card-title">Advanced</h2>
             </div>
+
+            {/* Vercel warning: LangChain agent is local-only */}
+            {storageType === 'vercel-kv' && (
+              <div style={{
+                background: '#fff7ed',
+                border: '1px solid #fed7aa',
+                borderRadius: '0.5rem',
+                padding: '0.75rem 1rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                gap: '0.5rem',
+                alignItems: 'flex-start',
+                fontSize: '0.875rem',
+                color: '#92400e',
+              }}>
+                <span style={{ fontSize: '1rem', lineHeight: 1 }}>⚠️</span>
+                <div>
+                  <strong>LangChain / MCP Agent not available on Vercel.</strong> The agent runs
+                  as a local Python process and cannot be reached from a Vercel deployment.
+                  Leave this field blank — the chat panel will show a "not configured" message
+                  instead of failing silently.
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <TextField
                 label="LangChain / MCP Agent URL"
                 fieldKey="mcp_server_url"
                 value={form.mcp_server_url}
                 onChange={handleChange}
-                placeholder="http://localhost:8000"
-                help="URL of the banking LangChain agent (WebSocket). Not available on Vercel."
+                placeholder={storageType === 'vercel-kv' ? 'Not available on Vercel — leave blank' : 'http://localhost:8000'}
+                help={storageType === 'vercel-kv'
+                  ? '⚠️ This URL is only reachable when running locally. On Vercel, clear this field.'
+                  : 'URL of the banking LangChain agent (WebSocket). Local only — not available on Vercel.'}
               />
               <div>
                 <label className="form-label">Debug OAuth logging</label>
