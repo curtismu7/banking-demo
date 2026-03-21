@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
 import { ToastContainer } from 'react-toastify';
@@ -19,6 +19,27 @@ import './App.css';
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Module-scoped ref for injecting user email into the WebSocket session_init message.
+  // Using a ref keeps userEmail out of window scope (avoids PII on global object).
+  const pendingUserEmailRef = useRef(null);
+
+  // Inject userEmail into the first session_init WS message then restore send.
+  const injectEmailIntoNextSessionInit = (email) => {
+    pendingUserEmailRef.current = email;
+    const _origSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+      try {
+        const msg = JSON.parse(data);
+        if (msg && msg.type === 'session_init' && pendingUserEmailRef.current) {
+          msg.userEmail = pendingUserEmailRef.current;
+          pendingUserEmailRef.current = null;
+          data = JSON.stringify(msg);
+          WebSocket.prototype.send = _origSend;
+        }
+      } catch(_e) {}
+      return _origSend.call(this, data);
+    };
+  };
 
   useEffect(() => {
     console.log('🔍 App useEffect - Starting authentication check...');
@@ -50,7 +71,6 @@ function App() {
       console.log('👑 Admin OAuth response:', {
         authenticated: adminResponse.data.authenticated,
         user: adminResponse.data.user,
-        hasAccessToken: !!adminResponse.data.accessToken,
         expiresAt: adminResponse.data.expiresAt
       });
       
@@ -59,20 +79,7 @@ function App() {
         setUser(adminResponse.data.user);
         const userEmail = adminResponse.data.user?.email;
         if (userEmail) {
-          window._bankingUserEmail = userEmail;
-          const _origSend = WebSocket.prototype.send;
-          WebSocket.prototype.send = function(data) {
-            try {
-              const msg = JSON.parse(data);
-              if (msg && msg.type === 'session_init' && window._bankingUserEmail) {
-                msg.userEmail = window._bankingUserEmail;
-                data = JSON.stringify(msg);
-                console.log('🔑 User email injected into session_init:', window._bankingUserEmail);
-                WebSocket.prototype.send = _origSend;
-              }
-            } catch(e) {}
-            return _origSend.call(this, data);
-          };
+          injectEmailIntoNextSessionInit(userEmail);
         }
         window.dispatchEvent(new CustomEvent('userAuthenticated'));
         setLoading(false);
@@ -85,7 +92,6 @@ function App() {
       console.log('👤 End user OAuth response:', {
         authenticated: userResponse.data.authenticated,
         user: userResponse.data.user,
-        hasAccessToken: !!userResponse.data.accessToken,
         expiresAt: userResponse.data.expiresAt
       });
       
@@ -94,20 +100,7 @@ function App() {
         setUser(userResponse.data.user);
         const userEmail = userResponse.data.user?.email;
         if (userEmail) {
-          window._bankingUserEmail = userEmail;
-          const _origSend = WebSocket.prototype.send;
-          WebSocket.prototype.send = function(data) {
-            try {
-              const msg = JSON.parse(data);
-              if (msg && msg.type === 'session_init' && window._bankingUserEmail) {
-                msg.userEmail = window._bankingUserEmail;
-                data = JSON.stringify(msg);
-                console.log('🔑 User email injected into session_init:', window._bankingUserEmail);
-                WebSocket.prototype.send = _origSend;
-              }
-            } catch(e) {}
-            return _origSend.call(this, data);
-          };
+          injectEmailIntoNextSessionInit(userEmail);
         }
         window.dispatchEvent(new CustomEvent('userAuthenticated'));
         setLoading(false);

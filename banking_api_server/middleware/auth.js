@@ -536,6 +536,66 @@ const authenticateToken = async (req, res, next) => {
     });
 
     if (!token) {
+      // BFF session fallback: if the browser SPA has a valid session (session cookie),
+      // use the session-stored token for validation instead of requiring the Authorization header.
+      // This prevents token relay — the token never needs to leave the backend.
+      const sessionToken = req.session?.oauthTokens?.accessToken;
+      if (sessionToken) {
+        logger.debug(LOG_CATEGORIES.AUTHENTICATION, 'Using session token as fallback (no Authorization header)', requestContext);
+        // Re-use the full validation pipeline below via reassignment
+        const authHeader2 = `Bearer ${sessionToken}`;
+        req.headers['authorization'] = authHeader2;
+        // Fall through by recursing minimally: just extract and continue
+        const sessionTokenExtracted = sessionToken;
+        // Use sessionTokenExtracted as the token for all validation below
+        // (the rest of the function uses `token` — update it via closure workaround)
+        // We reassign token here by falling through to the try block below with the session token.
+        try {
+          const { valid, decoded, error } = await validateP1AICToken(sessionTokenExtracted, requestContext);
+          if (!valid) {
+            logger.error(LOG_CATEGORIES.AUTHENTICATION, 'Session OAuth token validation failed', {
+              ...requestContext,
+              error_type: error?.type || 'unknown',
+              error_message: error?.message || 'Unknown validation error'
+            });
+            throw error;
+          }
+          const clientType = determineClientType(sessionTokenExtracted);
+          const scopes = parseTokenScopes(sessionTokenExtracted, requestContext);
+          const userType = determineUserTypeFromToken(decoded);
+          const adminClientId = process.env.PINGONE_ADMIN_CLIENT_ID || process.env.VITE_PINGONE_CLIENT_ID;
+          const tokenClientId = decoded.azp || decoded.client_id;
+          const isAdminClient = adminClientId && tokenClientId && tokenClientId === adminClientId;
+          const sessionRole = req.session?.user?.id === decoded.sub ? req.session.user.role : null;
+          const derivedRole = (isAdminClient || sessionRole === 'admin') ? 'admin' : 'user';
+          req.user = {
+            id: decoded.sub,
+            username: decoded.preferred_username || decoded.sub,
+            email: decoded.email,
+            role: derivedRole,
+            clientType: clientType,
+            userType: userType,
+            tokenType: 'oauth',
+            acr: decoded.acr || null,
+            scopes: scopes
+          };
+          logger.info(LOG_CATEGORIES.AUTHENTICATION, 'Session-based token authentication successful (BFF)', {
+            ...requestContext,
+            subject: decoded.sub,
+            client_type: clientType,
+            user_type: userType
+          });
+          return next();
+        } catch (sessionAuthError) {
+          logger.error(LOG_CATEGORIES.AUTHENTICATION, 'Session token validation error', {
+            ...requestContext,
+            error_message: sessionAuthError.message
+          });
+          if (sessionAuthError instanceof OAuthError) throw sessionAuthError;
+          throw new OAuthError(OAUTH_ERROR_TYPES.INVALID_TOKEN, 'Session token validation failed', 401);
+        }
+      }
+
       const error = new OAuthError(
         OAUTH_ERROR_TYPES.AUTHENTICATION_REQUIRED,
         'Access token is required',
