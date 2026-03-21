@@ -114,6 +114,8 @@ export default function Config() {
   const [testing, setTesting]     = useState(false);
   const [toast, setToast]         = useState(null);  // { type: 'success'|'error', msg }
   const [testResult, setTestResult] = useState(null);
+  // Admin password for Vercel (since serverless sessions don't persist)
+  const [configPassword, setConfigPassword] = useState('');  // matches ADMIN_CONFIG_PASSWORD env var
 
   // ── Fetch from server + merge with IndexedDB cache ──
   const loadConfig = useCallback(async () => {
@@ -185,12 +187,20 @@ export default function Config() {
     setTimeout(() => setToast(null), 5000);
   }
 
+  // Build auth headers for config write requests (Vercel: password header)
+  const getConfigHeaders = () => {
+    if (storageType === 'vercel-kv' && configPassword) {
+      return { 'X-Config-Password': configPassword };
+    }
+    return {};
+  };
+
   // ── Save ──
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const { data } = await axios.post('/api/admin/config', form);
+      const { data } = await axios.post('/api/admin/config', form, { headers: getConfigHeaders() });
       setIsConfigured(data.isConfigured);
 
       // Update secret meta from response
@@ -601,6 +611,38 @@ export default function Config() {
                 </select>
               </div>
             </div>
+
+            {/* Vercel: admin password required to save once config is set */}
+            {storageType === 'vercel-kv' && (
+              <div style={{ marginTop: '1rem', borderTop: '1px solid #e5e7eb', paddingTop: '1rem' }}>
+                <div style={{
+                  background: '#faf5ff',
+                  border: '1px solid #e9d5ff',
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '0.75rem',
+                  fontSize: '0.8125rem',
+                  color: '#6b21a8',
+                }}>
+                  <strong>🔑 Vercel Config Password</strong> — once credentials are saved, updates require
+                  an admin password. Set <code>ADMIN_CONFIG_PASSWORD</code> in your Vercel environment
+                  variables, then enter it here before saving. Leave blank on first-time setup.
+                </div>
+                <div className="form-group" style={{ maxWidth: '400px' }}>
+                  <label className="form-label">Config Password (Vercel only)</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    value={configPassword}
+                    onChange={(e) => setConfigPassword(e.target.value)}
+                    placeholder="Value of ADMIN_CONFIG_PASSWORD env var"
+                  />
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                    Required to overwrite config on Vercel. Not stored — enter each session.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Save button ── */}

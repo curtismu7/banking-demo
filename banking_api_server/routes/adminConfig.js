@@ -31,10 +31,26 @@ function isAdminSession(req) {
 }
 
 /**
- * Gate: allow request if (a) no config is stored yet, OR (b) caller is admin.
+ * Gate: allow request if (a) no config is stored yet, OR (b) caller is admin,
+ * OR (c) on Vercel and the correct ADMIN_CONFIG_PASSWORD header is provided,
+ * OR (d) on Vercel and ADMIN_CONFIG_PASSWORD is not set (open demo mode).
  */
 function requireAdminOrUnconfigured(req, res, next) {
-  if (!configStore.isConfigured() || isAdminSession(req)) return next();
+  if (!configStore.isConfigured()) return next(); // first-run: always open
+  if (isAdminSession(req)) return next();          // OAuth admin session
+
+  // Vercel path: sessions don't persist across serverless invocations.
+  // Check an optional admin password header instead.
+  if (process.env.VERCEL) {
+    const envPassword = process.env.ADMIN_CONFIG_PASSWORD;
+    if (!envPassword) return next(); // no password configured → open demo mode
+    if (req.headers['x-config-password'] === envPassword) return next();
+    return res.status(401).json({
+      error:   'unauthorized',
+      message: 'Config password required. Set the X-Config-Password header to match the ADMIN_CONFIG_PASSWORD environment variable.',
+    });
+  }
+
   return res.status(401).json({
     error:   'unauthorized',
     message: 'Admin session required to update config once the app is configured.',
