@@ -52,6 +52,9 @@ coverage/
 .vscode/
 .idea/
 
+# SSL certs (generated locally via mkcert — never commit private keys)
+certs/
+
 # Misc
 .DS_Store
 Thumbs.db

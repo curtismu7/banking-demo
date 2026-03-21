@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# run-bank.sh — Start the full Banking app on api.pingdemo.com so it can run
-# alongside MasterFlow (OAuth Playground) which uses :3000 and :3001.
+# run-bank.sh — Start the full Banking app on api.pingdemo.com (HTTPS) so it
+# can run alongside MasterFlow (OAuth Playground) on :3000 / :3001.
 #
 # Port layout:
-#   Banking API Server  → api.pingdemo.com:3002
-#   Banking UI          → api.pingdemo.com:4000
+#   Banking API Server  → https://api.pingdemo.com:3002
+#   Banking UI          → https://api.pingdemo.com:4000
 #   Banking MCP Server  → localhost:8080
 #   LangChain Agent     → localhost:8888
 #
-# One-time /etc/hosts setup (run once, requires sudo):
+# One-time setup (run once each, requires sudo for /etc/hosts):
 #   echo '127.0.0.1  api.pingdemo.com' | sudo tee -a /etc/hosts
+#   mkcert -install   # install local CA (once per machine)
 #
 # Usage:
 #   ./run-bank.sh           # start all services
@@ -22,18 +23,37 @@ BASEDIR="$(cd "$(dirname "$0")" && pwd)"
 API_HOST="api.pingdemo.com"
 API_PORT=3002
 UI_PORT=4000
-API_URL="http://${API_HOST}:${API_PORT}"
-CLIENT_URL="http://${API_HOST}:${UI_PORT}"
+API_URL="https://${API_HOST}:${API_PORT}"
+CLIENT_URL="https://${API_HOST}:${UI_PORT}"
 
-# ── /etc/hosts check ─────────────────────────────────────────────────────────
+CERT_DIR="${BASEDIR}/certs"
+CERT_FILE="${CERT_DIR}/api.pingdemo.com+2.pem"
+KEY_FILE="${CERT_DIR}/api.pingdemo.com+2-key.pem"
+
+# ── /etc/hosts check ─────────────────────────────────────────────────────────────────
 if ! grep -q "${API_HOST}" /etc/hosts 2>/dev/null; then
   echo "⚠️  ${API_HOST} is not in /etc/hosts."
   echo "   Run this once to add it, then restart the script:"
   echo "   echo '127.0.0.1  ${API_HOST}' | sudo tee -a /etc/hosts"
   echo ""
   echo "   Continuing with localhost fallback for now..."
-  API_URL="http://localhost:${API_PORT}"
-  CLIENT_URL="http://localhost:${UI_PORT}"
+  API_URL="https://localhost:${API_PORT}"
+  CLIENT_URL="https://localhost:${UI_PORT}"
+fi
+
+# ── SSL cert check / auto-generate ───────────────────────────────────────────
+if [[ ! -f "${CERT_FILE}" ]] || [[ ! -f "${KEY_FILE}" ]]; then
+  if command -v mkcert &>/dev/null; then
+    echo "🔐 Generating SSL certs for ${API_HOST}..."
+    mkdir -p "${CERT_DIR}"
+    (cd "${CERT_DIR}" && mkcert "${API_HOST}" localhost 127.0.0.1)
+    echo "✅ Certs created in ${CERT_DIR}"
+  else
+    echo "⚠️  mkcert not found — install with: brew install mkcert && mkcert -install"
+    echo "   Falling back to HTTP..."
+    API_URL="http://${API_HOST}:${API_PORT}"
+    CLIENT_URL="http://${API_HOST}:${UI_PORT}"
+  fi
 fi
 
 # PID files — separate from start.sh so both can coexist
@@ -95,11 +115,17 @@ fi
 if [[ -f "$BASEDIR/langchain_agent/main.py" ]] || [[ -f "$BASEDIR/langchain_agent/server.py" ]]; then
   ENTRY="main"
   [[ -f "$BASEDIR/langchain_agent/server.py" ]] && ENTRY="server"
-  echo "🔗 Starting LangChain Agent on :8888..."
+  echo "🔗 Starting LangChain Agent on :8888 (HTTPS if certs available)..."
   (
     cd "$BASEDIR/langchain_agent"
     [[ -d venv ]] && source venv/bin/activate
-    python3 -m uvicorn "${ENTRY}:app" --port 8888 > /tmp/bank-langchain-agent.log 2>&1
+    if [[ -f "${CERT_FILE}" ]] && [[ -f "${KEY_FILE}" ]]; then
+      python3 -m uvicorn "${ENTRY}:app" --port 8888 \
+        --ssl-keyfile "${KEY_FILE}" --ssl-certfile "${CERT_FILE}" \
+        > /tmp/bank-langchain-agent.log 2>&1
+    else
+      python3 -m uvicorn "${ENTRY}:app" --port 8888 > /tmp/bank-langchain-agent.log 2>&1
+    fi
   ) &
   echo $! > "$PID_AGENT"
 fi
@@ -114,8 +140,12 @@ echo "🌐 Starting Banking UI on ${CLIENT_URL}..."
   cd "$BASEDIR/banking_api_ui"
   HOST=0.0.0.0 \
   PORT=${UI_PORT} \
+  HTTPS=true \
+  SSL_CRT_FILE=${CERT_FILE} \
+  SSL_KEY_FILE=${KEY_FILE} \
   REACT_APP_API_URL=${API_URL} \
   REACT_APP_API_PORT=${API_PORT} \
+  REACT_APP_API_HTTPS=true \
   REACT_APP_CLIENT_URL=${CLIENT_URL} \
   DANGEROUSLY_DISABLE_HOST_CHECK=true \
   WDS_SOCKET_PORT=0 \

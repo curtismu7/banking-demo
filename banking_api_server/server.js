@@ -331,9 +331,25 @@ app.use((err, req, res, next) => {
 
 // Only start the server if this file is run directly (not imported for testing)
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Banking API server running on port ${PORT}`);
-  });
+  const fs = require('fs');
+  const certDir = path.join(__dirname, '../certs');
+  const certFile = path.join(certDir, 'api.pingdemo.com+2.pem');
+  const keyFile  = path.join(certDir, 'api.pingdemo.com+2-key.pem');
+
+  if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
+    const https = require('https');
+    https.createServer({
+      key:  fs.readFileSync(keyFile),
+      cert: fs.readFileSync(certFile),
+    }, app).listen(PORT, () => {
+      console.log(`Banking API server (HTTPS) running on https://api.pingdemo.com:${PORT}`);
+    });
+  } else {
+    app.listen(PORT, () => {
+      console.log(`Banking API server running on http://localhost:${PORT}`);
+      console.log('Tip: run mkcert in Banking/certs/ to enable HTTPS (see run-bank.sh)');
+    });
+  }
 }
 
 module.exports = app;
