@@ -380,7 +380,7 @@ const UserDashboard = ({ user: propUser, onLogout }) => {
             Transfers and withdrawals of $250 or more require MFA. Please verify your identity to continue.
           </span>
           <a
-            href="/api/auth/oauth/user/stepup?return_to=http://localhost:4000/dashboard"
+            href={`/api/auth/oauth/user/stepup?return_to=${process.env.REACT_APP_CLIENT_URL || 'http://localhost:4000'}/dashboard`}
             className="inline-message__action"
             style={{ marginLeft: 12, fontWeight: 600, color: 'inherit', textDecoration: 'underline' }}
           >
