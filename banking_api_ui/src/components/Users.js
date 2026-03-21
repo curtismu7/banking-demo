@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
+import { toast } from 'react-toastify';
 import apiClient from '../services/apiClient';
 
 const Users = ({ user, onLogout }) => {
@@ -62,6 +63,7 @@ const Users = ({ user, onLogout }) => {
       await apiClient.put(`/api/users/${userId}`, {
         isActive: !currentStatus
       });
+      toast.success(`User ${!currentStatus ? 'activated' : 'deactivated'} successfully`);
       fetchUsers(); // Refresh the list
     } catch (error) {
       console.error('Toggle status error:', error);
@@ -83,6 +85,7 @@ const Users = ({ user, onLogout }) => {
 
     try {
       await apiClient.delete(`/api/users/${userId}`);
+      toast.success(`User "${userName}" deleted successfully`);
       setError(''); // Clear any previous errors
       fetchUsers(); // Refresh the list
     } catch (error) {

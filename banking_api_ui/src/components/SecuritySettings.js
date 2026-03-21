@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { toast } from 'react-toastify';
 import apiClient from '../services/apiClient';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -121,7 +122,6 @@ const SecuritySettings = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
   const [dirty, setDirty] = useState(false);
 
   const fetchSettings = useCallback(async () => {
@@ -146,7 +146,6 @@ const SecuritySettings = ({ user }) => {
   const set = (key, value) => {
     setForm(prev => ({ ...prev, [key]: value }));
     setDirty(true);
-    setSuccessMsg('');
   };
 
   const handleSave = async () => {
@@ -157,7 +156,7 @@ const SecuritySettings = ({ user }) => {
       setSettings(res.data.settings);
       setForm({ ...res.data.settings });
       setDirty(false);
-      setSuccessMsg('Settings saved successfully.');
+      toast.success('Settings saved successfully.');
       // Re-fetch history
       const full = await apiClient.get('/api/admin/settings');
       setHistory(full.data.history || []);
@@ -171,7 +170,6 @@ const SecuritySettings = ({ user }) => {
   const handleReset = () => {
     setForm({ ...settings });
     setDirty(false);
-    setSuccessMsg('');
     setError('');
   };
 
@@ -218,11 +216,6 @@ const SecuritySettings = ({ user }) => {
       {error && (
         <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '12px 16px', borderRadius: '6px', marginBottom: '16px' }}>
           ⚠ {error}
-        </div>
-      )}
-      {successMsg && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534', padding: '12px 16px', borderRadius: '6px', marginBottom: '16px' }}>
-          ✓ {successMsg}
         </div>
       )}
 

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 import Login from './components/Login';
 import BankingAgent from './components/BankingAgent';
@@ -158,6 +160,7 @@ function App() {
   return (
     <Router>
       <div className="App">
+        <ToastContainer position="top-right" autoClose={4000} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
         {/* Config page is always accessible, regardless of auth state */}
         <Routes>
           <Route path="/config" element={<Config />} />

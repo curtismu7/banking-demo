@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { toast } from 'react-toastify';
 import { savePublicConfig, loadPublicConfig } from '../services/configService';
 
 // ─── Region options ───────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ export default function Config() {
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
   const [testing, setTesting]     = useState(false);
-  const [toast, setToast]         = useState(null);  // { type: 'success'|'error', msg }
+
   const [testResult, setTestResult] = useState(null);
   // Admin password for Vercel (since serverless sessions don't persist)
   const [configPassword, setConfigPassword] = useState('');  // matches ADMIN_CONFIG_PASSWORD env var
@@ -183,8 +184,8 @@ export default function Config() {
   };
 
   function showToast(type, msg) {
-    setToast({ type, msg });
-    setTimeout(() => setToast(null), 5000);
+    if (type === 'success') toast.success(msg);
+    else toast.error(msg);
   }
 
   // Build auth headers for config write requests (Vercel: password header)
@@ -288,23 +289,6 @@ export default function Config() {
           </div>
         </div>
       </div>
-
-      {/* Toast */}
-      {toast && (
-        <div style={{
-          position: 'fixed', top: '1rem', right: '1rem', zIndex: 9999,
-          background: toast.type === 'success' ? '#d1fae5' : '#fee2e2',
-          border: `1px solid ${toast.type === 'success' ? '#6ee7b7' : '#fca5a5'}`,
-          color: toast.type === 'success' ? '#065f46' : '#7f1d1d',
-          padding: '0.75rem 1.25rem',
-          borderRadius: '0.5rem',
-          boxShadow: '0 4px 6px rgba(0,0,0,.1)',
-          maxWidth: '28rem',
-          fontWeight: 500,
-        }}>
-          {toast.msg}
-        </div>
-      )}
 
       <div className="container" style={{ padding: '2rem 20px', maxWidth: '800px' }}>
 
