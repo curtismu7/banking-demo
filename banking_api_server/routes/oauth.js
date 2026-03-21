@@ -6,6 +6,20 @@ const dataStore = require('../data/store');
 const { determineClientType } = require('../middleware/auth');
 
 /**
+ * Derive the frontend origin for redirect URLs.
+ * Priority:
+ *   1. configStore frontend_url (set via Config UI)
+ *   2. REACT_APP_CLIENT_URL env var (set by run-bank.sh)
+ *   3. On Vercel: derive from the incoming request host (works on any Vercel URL)
+ *   4. Local dev fallback: http://localhost:3000
+ */
+function getOrigin(req) {
+  return configStore.getEffective('frontend_url')
+    || process.env.REACT_APP_CLIENT_URL
+    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000');
+}
+
+/**
  * Initiate OAuth login for admin users
  * Redirects to P1AIC authorization endpoint
  */
@@ -13,8 +27,7 @@ router.get('/login', (req, res) => {
   try {
     // Guard: redirect to config if PingOne credentials are not set
     if (!configStore.isConfigured()) {
-      const frontendUrl = configStore.getEffective('frontend_url') || process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/config?error=not_configured`);
+      return res.redirect(`${getOrigin(req)}/config?error=not_configured`);
     }
 
     // Generate state parameter for CSRF protection
@@ -47,15 +60,13 @@ router.get('/callback', async (req, res) => {
     // Check for OAuth errors
     if (error) {
       console.error('OAuth error:', error);
-      const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/login?error=oauth_error`);
+      return res.redirect(`${getOrigin(req)}/login?error=oauth_error`);
     }
 
     // Validate state parameter
     if (!state || state !== req.session.oauthState) {
       console.error('Invalid state parameter');
-      const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/login?error=invalid_state`);
+      return res.redirect(`${getOrigin(req)}/login?error=invalid_state`);
     }
 
     // Clear state and code_verifier from session
@@ -139,16 +150,14 @@ router.get('/callback', async (req, res) => {
     req.session.save((saveErr) => {
       if (saveErr) {
         console.error('Session save error:', saveErr);
-        const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-        return res.redirect(`${frontendUrl}/login?error=session_error`);
+        return res.redirect(`${getOrigin(req)}/login?error=session_error`);
       }
-      const adminUrl = process.env.FRONTEND_ADMIN_URL || 'http://localhost:3001/admin';
+      const adminUrl = process.env.FRONTEND_ADMIN_URL || `${getOrigin(req)}/admin`;
       res.redirect(`${adminUrl}?oauth=success`);
     });
   } catch (error) {
     console.error('OAuth callback error:', error);
-    const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/login?error=callback_failed`);
+    res.redirect(`${getOrigin(req)}/login?error=callback_failed`);
   }
 });
 
@@ -157,8 +166,7 @@ router.get('/callback', async (req, res) => {
  */
 router.get('/logout', (req, res) => {
   const idToken = req.session.oauthTokens?.idToken || null;
-  const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-  const postLogoutUri = `${frontendUrl}/login`;
+  const postLogoutUri = `${getOrigin(req)}/login`;
 
   req.session.destroy((err) => {
     if (err) {

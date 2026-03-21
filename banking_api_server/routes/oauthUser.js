@@ -7,6 +7,20 @@ const { determineClientType } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
 
 /**
+ * Derive the frontend origin for redirect URLs.
+ * Priority:
+ *   1. configStore frontend_url (set via Config UI)
+ *   2. REACT_APP_CLIENT_URL env var (set by run-bank.sh)
+ *   3. On Vercel: derive from the incoming request host
+ *   4. Local dev fallback: http://localhost:3000
+ */
+function getOrigin(req) {
+  return configStore.getEffective('frontend_url')
+    || process.env.REACT_APP_CLIENT_URL
+    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000');
+}
+
+/**
  * Create sample accounts and transactions for new customers
  */
 async function createSampleDataForCustomer(userId, firstName, lastName) {
@@ -113,8 +127,7 @@ router.get('/login', (req, res) => {
   try {
     // Guard: redirect to config if PingOne credentials are not set
     if (!configStore.isConfigured()) {
-      const frontendUrl = configStore.getEffective('frontend_url') || process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/config?error=not_configured`);
+      return res.redirect(`${getOrigin(req)}/config?error=not_configured`);
     }
 
     const state = oauthService.generateState();
@@ -130,8 +143,7 @@ router.get('/login', (req, res) => {
     res.redirect(url);
   } catch (error) {
     console.error('OAuth login error:', error);
-    const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/login?error=oauth_init_failed`);
+    res.redirect(`${getOrigin(req)}/login?error=oauth_init_failed`);
   }
 });
 
@@ -145,22 +157,19 @@ router.get('/callback', async (req, res) => {
     // Check for OAuth errors
     if (error) {
       console.error('OAuth error:', error);
-      const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/login?error=oauth_error`);
+      return res.redirect(`${getOrigin(req)}/login?error=oauth_error`);
     }
     
     // Validate state parameter
     if (!state || state !== req.session.oauthState) {
       console.error('Invalid state parameter');
-      const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/login?error=invalid_state`);
+      return res.redirect(`${getOrigin(req)}/login?error=invalid_state`);
     }
     
     // Validate code parameter
     if (!code) {
       console.error('No authorization code received');
-      const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/login?error=no_code`);
+      return res.redirect(`${getOrigin(req)}/login?error=no_code`);
     }
     
     // Retrieve and clear the PKCE code verifier from session
@@ -273,8 +282,7 @@ router.get('/callback', async (req, res) => {
     req.session.save((saveErr) => {
       if (saveErr) {
         console.error('Session save error:', saveErr);
-        const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-        return res.redirect(`${frontendUrl}/login?error=session_error`);
+        return res.redirect(`${getOrigin(req)}/login?error=session_error`);
       }
 
       // If this was a step-up flow, return to whichever page triggered it
@@ -285,18 +293,17 @@ router.get('/callback', async (req, res) => {
       }
 
       if (user.role === 'admin') {
-        const adminUrl = process.env.FRONTEND_ADMIN_URL || 'http://localhost:3001/admin';
+        const adminUrl = process.env.FRONTEND_ADMIN_URL || `${getOrigin(req)}/admin`;
         res.redirect(`${adminUrl}?oauth=success`);
       } else {
-        const dashboardUrl = process.env.FRONTEND_DASHBOARD_URL || 'http://localhost:3001/dashboard';
+        const dashboardUrl = process.env.FRONTEND_DASHBOARD_URL || `${getOrigin(req)}/dashboard`;
         res.redirect(`${dashboardUrl}?oauth=success&stepup=done`);
       }
     });
     
   } catch (error) {
     console.error('OAuth callback error:', error);
-    const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/login?error=callback_failed`);
+    res.redirect(`${getOrigin(req)}/login?error=callback_failed`);
   }
 });
 
@@ -330,15 +337,13 @@ router.get('/stepup', (req, res) => {
     req.session.save((err) => {
       if (err) {
         console.error('[StepUp] Session save error:', err);
-        const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-        return res.redirect(`${frontendUrl}/dashboard?error=stepup_init_failed`);
+        return res.redirect(`${getOrigin(req)}/dashboard?error=stepup_init_failed`);
       }
       res.redirect(url);
     });
   } catch (error) {
     console.error('[StepUp] Error initiating step-up:', error);
-    const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-    res.redirect(`${frontendUrl}/dashboard?error=stepup_init_failed`);
+    res.redirect(`${getOrigin(req)}/dashboard?error=stepup_init_failed`);
   }
 });
 
@@ -371,8 +376,7 @@ router.get('/status', (req, res) => {
  */
 router.get('/logout', (req, res) => {
   const idToken = req.session.oauthTokens?.idToken || null;
-  const frontendUrl = process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000';
-  const postLogoutUri = `${frontendUrl}/login`;
+  const postLogoutUri = `${getOrigin(req)}/login`;
 
   req.session.destroy((err) => {
     if (err) {
