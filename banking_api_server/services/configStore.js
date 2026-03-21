@@ -32,7 +32,7 @@ const USE_KV   = !!(KV_URL && KV_TOKEN);
 const KV_HASH_KEY = 'banking:config';
 
 // Fields that must be encrypted at rest
-const SECRET_KEYS = new Set(['admin_client_secret', 'user_client_secret', 'session_secret']);
+const SECRET_KEYS = new Set(['admin_client_secret', 'user_client_secret', 'session_secret', 'authorize_worker_client_secret']);
 
 // All known config keys with their defaults and whether they are public
 const FIELD_DEFS = {
@@ -59,6 +59,12 @@ const FIELD_DEFS = {
   frontend_url:           { public: true,  default: '' },
   mcp_server_url:         { public: true,  default: 'http://localhost:8000' },
   debug_oauth:            { public: true,  default: 'false' },
+
+  // PingOne Authorize (policy decision point for transfers/withdrawals)
+  authorize_enabled:              { public: true,  default: 'false' },
+  authorize_policy_id:            { public: true,  default: '' },
+  authorize_worker_client_id:     { public: true,  default: '' },
+  authorize_worker_client_secret: { public: false, default: '' },
 };
 
 // ---------------------------------------------------------------------------

@@ -57,3 +57,8 @@ coverage/
 Thumbs.db
 banking_api_server/data/persistent/
 .vercel
+
+# Test artifacts
+banking_mcp_server/tests/storage/test-banking-sessions-logging/
+banking_mcp_server/tests/storage/**/
+

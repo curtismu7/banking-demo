@@ -4,6 +4,7 @@ const dataStore = require('../data/store');
 const { authenticateToken, requireScopes } = require('../middleware/auth');
 const runtimeSettings = require('../config/runtimeSettings');
 const pingOneAuthorizeService = require('../services/pingOneAuthorizeService');
+const configStore = require('../services/configStore');
 
 // Get all transactions (admin only)
 router.get('/', authenticateToken, requireScopes(['banking:transactions:read', 'banking:read']), async (req, res) => {
@@ -187,21 +188,40 @@ router.post('/', authenticateToken, requireScopes(['banking:transactions:write',
 
     // ── PingOne Authorize gate ────────────────────────────────────────────────
     // When enabled, evaluates the transaction against the configured Authorize
-    // policy decision point. Runs in addition to (not instead of) the threshold
-    // gate above — both controls remain active independently.
-    const AUTHORIZE_ENABLED = runtimeSettings.get('authorizeEnabled');
-    const AUTHORIZE_POLICY_ID = runtimeSettings.get('authorizePolicyId');
+    // policy decision point. Applies to transfers and withdrawals only.
+    // configStore fields take precedence; runtimeSettings toggle allows live
+    // enable/disable without a config save.
+    const AUTHORIZE_ENABLED =
+      (configStore.get('authorize_enabled') === 'true' || configStore.get('authorize_enabled') === true) ||
+      runtimeSettings.get('authorizeEnabled');
+    const AUTHORIZE_POLICY_ID =
+      configStore.get('authorize_policy_id') ||
+      runtimeSettings.get('authorizePolicyId');
+    const AUTHORIZE_TYPES = ['transfer', 'withdrawal'];
 
-    if (AUTHORIZE_ENABLED && AUTHORIZE_POLICY_ID && req.user.role !== 'admin') {
+    if (AUTHORIZE_ENABLED && AUTHORIZE_POLICY_ID && req.user.role !== 'admin' && AUTHORIZE_TYPES.includes(type)) {
       try {
-        const { decision } = await pingOneAuthorizeService.evaluateTransaction({
+        const { decision, stepUpRequired } = await pingOneAuthorizeService.evaluateTransaction({
           policyId: AUTHORIZE_POLICY_ID,
           userId: req.user.id,
           amount: parseFloat(amount),
           type,
           acr: req.user.acr,
         });
-        console.log(`[Authorize] Policy ${AUTHORIZE_POLICY_ID} — user ${req.user.id} — decision: ${decision}`);
+        console.log(`[Authorize] Policy ${AUTHORIZE_POLICY_ID} — user ${req.user.id} — type ${type} — decision: ${decision} — stepUpRequired: ${stepUpRequired}`);
+
+        // Policy signalled that a step-up is required (obligation/advice)
+        if (stepUpRequired) {
+          const STEP_UP_ACR = runtimeSettings.get('stepUpAcrValue');
+          return res.status(428).json({
+            error: 'step_up_required',
+            error_description: 'This transaction requires additional authentication (MFA) as required by the authorization policy.',
+            step_up_acr: STEP_UP_ACR,
+            step_up_url: '/api/auth/oauth/user/stepup',
+            authorize_policy_id: AUTHORIZE_POLICY_ID,
+          });
+        }
+
         if (decision === 'DENY') {
           return res.status(403).json({
             error: 'transaction_denied',

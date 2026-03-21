@@ -27,6 +27,11 @@ const EMPTY_FORM = {
   frontend_url: '',
   mcp_server_url: 'http://localhost:8000',
   debug_oauth: 'false',
+  // PingOne Authorize
+  authorize_enabled: 'false',
+  authorize_policy_id: '',
+  authorize_worker_client_id: '',
+  authorize_worker_client_secret: '',
 };
 
 // ─── Helper: secret field wrapper ────────────────────────────────────────────
@@ -488,7 +493,62 @@ export default function Config() {
             </div>
           </div>
 
-          {/* ── Section 5: Advanced ── */}
+          {/* ── Section 5: PingOne Authorize ── */}
+          <div className="card">
+            <div className="card-header">
+              <h2 className="card-title">PingOne Authorize</h2>
+              <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: 0 }}>
+                Policy-based authorization for transfers and withdrawals. Requires a Worker app
+                with the <strong>Identity Data Admin</strong> role and a configured Policy Decision Point.
+              </p>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="form-group">
+                <label className="form-label">Enable PingOne Authorize</label>
+                <select
+                  className="form-input"
+                  value={form.authorize_enabled}
+                  onChange={(e) => handleChange('authorize_enabled', e.target.value)}
+                >
+                  <option value="false">Disabled</option>
+                  <option value="true">Enabled — enforce on transfers &amp; withdrawals</option>
+                </select>
+                <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  When enabled, every transfer and withdrawal is evaluated against the policy below.
+                </p>
+              </div>
+              <TextField
+                label="Policy Decision Point ID"
+                fieldKey="authorize_policy_id"
+                value={form.authorize_policy_id}
+                onChange={handleChange}
+                placeholder="e.g. abc12345-…"
+                help="The PDP ID from PingOne Authorize → Policy Decision Points."
+              />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+              <TextField
+                label="Worker App Client ID"
+                fieldKey="authorize_worker_client_id"
+                value={form.authorize_worker_client_id}
+                onChange={handleChange}
+                placeholder="Worker app client ID"
+                help="Client ID of the Worker application used to obtain tokens for policy evaluation."
+              />
+              <SecretField
+                label="Worker App Client Secret"
+                fieldKey="authorize_worker_client_secret"
+                value={form.authorize_worker_client_secret}
+                isSet={secretMeta.authorize_worker_client_secret_set}
+                showValue={!!showSecret.authorize_worker_client_secret}
+                onToggleShow={toggleShow}
+                onChange={handleChange}
+                help="Client secret for the Worker app. Stored encrypted at rest."
+              />
+            </div>
+          </div>
+
+          {/* ── Section 6: Advanced ── */}
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">Advanced</h2>
