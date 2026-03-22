@@ -66,3 +66,14 @@ banking_api_server/data/persistent/
 banking_mcp_server/tests/storage/test-banking-sessions-logging/
 banking_mcp_server/tests/storage/**/
 
+# Playwright (UI / e2e)
+playwright-report/
+test-results/
+
+# Local archives & one-off root scripts
+/Archive.zip
+/fix_p1aic.py
+
+# macOS / zip extraction cruft
+**/__MACOSX/
+
