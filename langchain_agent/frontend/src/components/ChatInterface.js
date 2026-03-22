@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 import AuthorizationModal from './AuthorizationModal';
@@ -14,6 +14,8 @@ const ChatInterface = ({ apiUrl, onDashboardRefresh }) => {
     requestId: null
   });
   const messagesEndRef = useRef(null);
+  /** Tracks WebSocket stream session so late events from another session are ignored. */
+  const sessionIdRef = useRef(null);
   const { 
     connectionState, 
     isConnected, 
@@ -30,7 +32,7 @@ const ChatInterface = ({ apiUrl, onDashboardRefresh }) => {
   };
 
   // Helper function to detect banking operations and trigger dashboard refresh
-  const detectAndRefreshDashboard = (messageContent) => {
+  const detectAndRefreshDashboard = useCallback((messageContent) => {
     if (!onDashboardRefresh) return;
 
     try {
@@ -108,7 +110,7 @@ const ChatInterface = ({ apiUrl, onDashboardRefresh }) => {
     } catch (error) {
       console.error('Error detecting banking operations for dashboard refresh:', error);
     }
-  };
+  }, [onDashboardRefresh]);
 
   useEffect(() => {
     scrollToBottom();
@@ -119,8 +121,9 @@ const ChatInterface = ({ apiUrl, onDashboardRefresh }) => {
     if (lastMessage) {
       if (lastMessage.type === 'stream_event') {
         const sid = lastMessage.session_id;
-        if (sid && sessionIdRef.current && sid !== sessionIdRef.current) {
-          return;
+        if (sid) {
+          if (!sessionIdRef.current) sessionIdRef.current = sid;
+          else if (sid !== sessionIdRef.current) return;
         }
         const { event, tool, token, output_preview: preview, error: toolErr } = lastMessage;
 
@@ -239,7 +242,7 @@ const ChatInterface = ({ apiUrl, onDashboardRefresh }) => {
         setMessages(prev => [...prev, errorMessage]);
       }
     }
-  }, [lastMessage]);
+  }, [lastMessage, detectAndRefreshDashboard]);
 
   const handleSendMessage = async (messageContent) => {
     if (!messageContent.trim() || !isConnected) return;

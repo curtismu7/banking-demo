@@ -70,7 +70,7 @@ export const useWebSocket = (apiUrl = null) => {
       webSocketService.off('message', handleMessage);
       webSocketService.off('error', handleError);
     };
-  }, [handleConnected, handleDisconnected, handleMessage, handleError]);
+  }, [handleConnected, handleDisconnected, handleMessage, handleError, apiUrl]);
 
   const sendMessage = useCallback((message) => {
     if (!sessionIdRef.current) {

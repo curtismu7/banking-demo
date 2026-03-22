@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './Message.css';
@@ -197,13 +197,15 @@ const Message = ({ message, onAuthorizationComplete }) => {
       <ReactMarkdown 
         remarkPlugins={[remarkGfm]}
         components={{
-          a: ({ node, ...props }) => (
-            <a 
-              {...props} 
-              target="_blank" 
+          a: ({ node, children, ...props }) => (
+            <a
+              {...props}
+              target="_blank"
               rel="noopener noreferrer"
               className="markdown-link"
-            />
+            >
+              {children}
+            </a>
           ),
           code: ({ node, inline, ...props }) => (
             <code 
