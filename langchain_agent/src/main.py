@@ -117,6 +117,24 @@ class LangChainMCPApplication:
             # Start message processor
             await self.message_processor.start()
             self.health_server.update_status("message_processor", "ready")
+
+            # MCP Host inspector snapshot (HTTP GET /inspector/mcp-host on health port)
+            try:
+                tools = await self.agent.get_available_tools()
+                registry = await self.mcp_client_manager.get_manager_status()
+                self.health_server.app_status["mcp_host_inspector"] = {
+                    "role": "mcp_host",
+                    "summary": (
+                        "LangChain process: LLM orchestrates user turns; MCP client executes "
+                        "tools over WebSocket to MCP servers (e.g. banking). Chat WebSocket is UI transport."
+                    ),
+                    "chat_websocket_port": self.config.chat.websocket_port,
+                    "mcp_discovery_model": "Host lists tools from MCP via MCPClientManager after connect; model chooses tools/call.",
+                    "langchain_tools_exposed_to_llm": tools,
+                    "mcp_client_registry": registry,
+                }
+            except Exception as snap_err:
+                logger.warning("MCP host inspector snapshot skipped: %s", snap_err)
             
             # Mark as initialized
             self.health_server.set_initialized(True)

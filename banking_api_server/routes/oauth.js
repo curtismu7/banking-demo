@@ -20,8 +20,20 @@ function getOrigin(req) {
 }
 
 /**
+ * Derive the OAuth redirect URI for the admin flow.
+ * Priority:
+ *   1. configStore admin_redirect_uri / PINGONE_CORE_REDIRECT_URI env var (explicit override)
+ *   2. On Vercel: derived from request host — works on any Vercel deployment URL automatically
+ *   3. Local dev fallback: http://localhost:3001 (server port, not React port)
+ */
+function getRedirectUri(req) {
+  return configStore.getEffective('admin_redirect_uri')
+    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}/api/auth/oauth/callback` : 'http://localhost:3001/api/auth/oauth/callback');
+}
+
+/**
  * Initiate OAuth login for admin users
- * Redirects to P1AIC authorization endpoint
+ * Redirects to PingOne Core authorization endpoint
  */
 router.get('/login', (req, res) => {
   try {
@@ -35,11 +47,13 @@ router.get('/login', (req, res) => {
 
     // Generate PKCE code_verifier and store in session
     const codeVerifier = oauthService.generateCodeVerifier();
+    const redirectUri = getRedirectUri(req);
     req.session.oauthState = state;
     req.session.oauthCodeVerifier = codeVerifier;
+    req.session.oauthRedirectUri = redirectUri;
 
     // Generate authorization URL (includes code_challenge derived from verifier)
-    const authUrl = oauthService.generateAuthorizationUrl(state, codeVerifier);
+    const authUrl = oauthService.generateAuthorizationUrl(state, codeVerifier, redirectUri);
 
     // Redirect to PingOne
     res.redirect(authUrl);
@@ -51,7 +65,7 @@ router.get('/login', (req, res) => {
 
 /**
  * OAuth callback handler
- * Receives authorization code from P1AIC and exchanges it for tokens
+ * Receives authorization code from PingOne Core and exchanges it for tokens
  */
 router.get('/callback', async (req, res) => {
   try {
@@ -69,17 +83,19 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${getOrigin(req)}/login?error=invalid_state`);
     }
 
-    // Clear state and code_verifier from session
+    // Clear state, code_verifier and redirect URI from session
     const codeVerifier = req.session.oauthCodeVerifier;
+    const redirectUri = req.session.oauthRedirectUri;
     delete req.session.oauthState;
     delete req.session.oauthCodeVerifier;
+    delete req.session.oauthRedirectUri;
 
     // Exchange authorization code for access token (with PKCE verifier)
-    const tokenData = await oauthService.exchangeCodeForToken(code, codeVerifier);
+    const tokenData = await oauthService.exchangeCodeForToken(code, codeVerifier, redirectUri);
     
-    // Get user information from P1AIC
+    // Get user information from PingOne Core
     const userInfo = await oauthService.getUserInfo(tokenData.access_token);
-    console.log('User info from P1AIC:', JSON.stringify(userInfo, null, 2));
+    console.log('User info from PingOne Core:', JSON.stringify(userInfo, null, 2));
     
     // Create user object from OAuth data
     const oauthUser = oauthService.createUserFromOAuth(userInfo);
@@ -91,7 +107,7 @@ router.get('/callback', async (req, res) => {
     
     if (!user) {
       // For OAuth users, we'll create them as admin by default
-      // In production, you might want to check a whitelist or specific P1AIC attributes
+      // In production, you might want to check a whitelist or specific PingOne Core attributes
       console.log('Creating new OAuth user as admin:', oauthUser.username);
       oauthUser.role = 'admin'; // Make OAuth users admin by default
     } else {
@@ -241,7 +257,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     // TODO: Implement token refresh logic
-    // This would require implementing the refresh token flow with P1AIC
+    // This would require implementing the refresh token flow with PingOne Core
     
     res.json({ message: 'Token refresh not yet implemented' });
   } catch (error) {

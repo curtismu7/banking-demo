@@ -2,11 +2,25 @@ import { SessionManager, SessionData } from './SessionManager';
 import { createHash } from 'crypto';
 
 /**
+ * CIBA pending authentication request stored in session
+ */
+export interface CIBAPendingRequest {
+  authReqId: string;
+  initiatedAt: number;    // epoch ms
+  expiresAt: number;      // epoch ms
+  interval: number;       // poll interval in seconds
+  userEmail: string;
+  requiredScope: string;
+}
+
+/**
  * Banking-specific session data structure
  */
 export interface BankingSession extends SessionData {
   userTokens?: UserTokens[];
   sessionStats?: SessionStats;
+  /** Email address of the authenticated user — injected at connection time for CIBA. */
+  userEmail?: string;
 }
 
 /**
@@ -68,6 +82,10 @@ export class BankingSessionManager {
   private monitoringStats: SessionMonitoringStats;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private sessionCreationTimes: Map<string, Date> = new Map(); // sessionId -> creation time
+  /** In-memory CIBA request store keyed by "sessionId::authReqId" */
+  private cibaRequests: Map<string, CIBAPendingRequest> = new Map();
+  /** User email per session — set at connection time from the frontend */
+  private sessionEmails: Map<string, string> = new Map(); // sessionId -> email
 
   constructor(
     storagePath: string,
@@ -769,5 +787,49 @@ export class BankingSessionManager {
         console.log(`[BankingSessionManager] Cleaned up ${session.userTokens.length - validTokens.length} expired token sets from session ${sessionId}`);
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // CIBA request tracking
+  // ---------------------------------------------------------------------------
+
+  /** Store a CIBA pending request in memory keyed by sessionId + authReqId. */
+  storeCIBARequest(sessionId: string, request: CIBAPendingRequest): void {
+    this.cibaRequests.set(`${sessionId}::${request.authReqId}`, request);
+    // Also record the email for this session
+    if (request.userEmail) {
+      this.sessionEmails.set(sessionId, request.userEmail);
+    }
+  }
+
+  /** Retrieve a pending CIBA request (null if expired or not found). */
+  getCIBARequest(sessionId: string, authReqId: string): CIBAPendingRequest | null {
+    const key = `${sessionId}::${authReqId}`;
+    const request = this.cibaRequests.get(key);
+    if (!request) return null;
+    if (Date.now() > request.expiresAt) {
+      this.cibaRequests.delete(key);
+      return null;
+    }
+    return request;
+  }
+
+  /** Remove a completed or cancelled CIBA request. */
+  deleteCIBARequest(sessionId: string, authReqId: string): void {
+    this.cibaRequests.delete(`${sessionId}::${authReqId}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // User email per session
+  // ---------------------------------------------------------------------------
+
+  /** Record the authenticated user's email for a session (injected at connection time). */
+  setSessionEmail(sessionId: string, email: string): void {
+    this.sessionEmails.set(sessionId, email);
+  }
+
+  /** Retrieve the email associated with a session, or undefined. */
+  getSessionEmail(sessionId: string): string | undefined {
+    return this.sessionEmails.get(sessionId);
   }
 }

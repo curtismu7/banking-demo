@@ -1,7 +1,7 @@
 /**
  * PingOne Token Validation Service
  * Validates JWTs issued by PingOne using the JWKS endpoint.
- * Replaces the previous ForgeRock/P1AIC token validation approach.
+ * Replaces the previous ForgeRock/PingOne Core token validation approach.
  */
 const https = require('https');
 const crypto = require('crypto');

@@ -51,6 +51,7 @@ coverage/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # SSL certs (generated locally via mkcert — never commit private keys)
 certs/

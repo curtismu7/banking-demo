@@ -65,6 +65,19 @@ const FIELD_DEFS = {
   authorize_policy_id:            { public: true,  default: '' },
   authorize_worker_client_id:     { public: true,  default: '' },
   authorize_worker_client_secret: { public: false, default: '' },
+
+  // RFC 8693 Token Exchange — MCP server resource URI
+  // When set, the BFF exchanges user tokens for delegated tokens scoped to this
+  // audience before forwarding to the MCP server (act claim identifies the BFF).
+  mcp_resource_uri:           { public: true,  default: '' },
+
+  // CIBA — Client-Initiated Backchannel Authentication
+  ciba_enabled:               { public: true,  default: 'false' },
+  ciba_token_delivery_mode:   { public: true,  default: 'poll' },
+  ciba_binding_message:       { public: true,  default: 'Banking App Authentication' },
+  ciba_notification_endpoint: { public: true,  default: '' },
+  ciba_poll_interval_ms:      { public: true,  default: '5000' },
+  ciba_auth_request_expiry:   { public: true,  default: '300' },
 };
 
 // ---------------------------------------------------------------------------
@@ -199,8 +212,12 @@ class ConfigStore {
    * Persist new configuration values.
    * Accepts partial updates — only sets keys that are provided and non-empty.
    * Secrets are encrypted before writing to storage.
+   *
+   * On Vercel, configuration is managed via environment variables and cannot
+   * be changed at runtime — this method is a no-op in that environment.
    */
   async setConfig(data) {
+    if (process.env.VERCEL) return; // read-only in Vercel deployments
     await this.ensureInitialized();
 
     const updates = {};        // what goes into storage (encrypted secrets)
@@ -259,28 +276,34 @@ class ConfigStore {
 
   /**
    * Returns the effective value for a key:
-   * configStore cache → relevant process.env fallbacks → field default.
+   * - On Vercel: env vars only (config store is read-only, env vars are authoritative)
+   * - Locally: configStore cache → relevant process.env fallbacks → field default.
    * This is what config/oauth.js getters call.
    */
   getEffective(key) {
-    const stored = this.get(key);
-    if (stored) return stored;
+    // On Vercel, always read from environment variables — the stored config is ignored
+    // so that the Vercel-managed env vars are always authoritative.
+    if (!process.env.VERCEL) {
+      const stored = this.get(key);
+      if (stored) return stored;
+    }
 
-    // Env-var fallback map (handles legacy P1AIC_ naming)
+    // Env-var fallback map (handles legacy PINGONE_CORE_ naming)
     const envFallbackMap = {
       pingone_environment_id: ['PINGONE_ENVIRONMENT_ID'],
       pingone_region:         ['PINGONE_REGION'],
-      admin_client_id:        ['P1AIC_CLIENT_ID', 'PINGONE_ADMIN_CLIENT_ID', 'VITE_PINGONE_CLIENT_ID'],
-      admin_client_secret:    ['P1AIC_CLIENT_SECRET', 'PINGONE_ADMIN_CLIENT_SECRET', 'VITE_PINGONE_CLIENT_SECRET'],
-      admin_redirect_uri:     ['P1AIC_REDIRECT_URI', 'PINGONE_ADMIN_REDIRECT_URI'],
-      user_client_id:         ['P1AIC_USER_CLIENT_ID', 'PINGONE_USER_CLIENT_ID', 'VITE_PINGONE_CLIENT_ID'],
-      user_client_secret:     ['P1AIC_USER_CLIENT_SECRET', 'PINGONE_USER_CLIENT_SECRET', 'VITE_PINGONE_CLIENT_SECRET'],
-      user_redirect_uri:      ['P1AIC_USER_REDIRECT_URI', 'PINGONE_USER_REDIRECT_URI'],
+      admin_client_id:        ['PINGONE_CORE_CLIENT_ID', 'PINGONE_ADMIN_CLIENT_ID', 'VITE_PINGONE_CLIENT_ID'],
+      admin_client_secret:    ['PINGONE_CORE_CLIENT_SECRET', 'PINGONE_ADMIN_CLIENT_SECRET', 'VITE_PINGONE_CLIENT_SECRET'],
+      admin_redirect_uri:     ['PINGONE_CORE_REDIRECT_URI', 'PINGONE_ADMIN_REDIRECT_URI'],
+      user_client_id:         ['PINGONE_CORE_USER_CLIENT_ID', 'PINGONE_USER_CLIENT_ID', 'VITE_PINGONE_CLIENT_ID'],
+      user_client_secret:     ['PINGONE_CORE_USER_CLIENT_SECRET', 'PINGONE_USER_CLIENT_SECRET', 'VITE_PINGONE_CLIENT_SECRET'],
+      user_redirect_uri:      ['PINGONE_CORE_USER_REDIRECT_URI', 'PINGONE_USER_REDIRECT_URI'],
       admin_role:             ['ADMIN_ROLE'],
       user_role:              ['USER_ROLE'],
       session_secret:         ['SESSION_SECRET'],
       frontend_url:           ['REACT_APP_CLIENT_URL', 'FRONTEND_ADMIN_URL'],
       mcp_server_url:         ['MCP_SERVER_URL'],
+      mcp_resource_uri:       ['MCP_SERVER_RESOURCE_URI'],
       debug_oauth:            ['DEBUG_OAUTH'],
     };
 
@@ -291,6 +314,11 @@ class ConfigStore {
     }
 
     return FIELD_DEFS[key]?.default || '';
+  }
+
+  /** True when config cannot be changed at runtime (Vercel deployments). */
+  isReadOnly() {
+    return !!process.env.VERCEL;
   }
 
   /** 'vercel-kv', 'upstash-direct', or 'sqlite' */
@@ -306,6 +334,7 @@ class ConfigStore {
 
   /** Reset only works if called with correct SESSION_SECRET (basic safety). */
   async resetConfig() {
+    if (process.env.VERCEL) return; // read-only in Vercel deployments
     if (USE_KV) {
       const { createClient } = require('@vercel/kv');
       const kv = createClient({ url: KV_URL, token: KV_TOKEN });

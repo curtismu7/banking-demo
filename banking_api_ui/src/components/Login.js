@@ -92,7 +92,7 @@ const Login = () => {
                   className="btn btn-primary oauth-btn"
                   disabled={loading}
                 >
-                  {loading ? 'Redirecting...' : 'Admin Sign in with P1AIC'}
+                  {loading ? 'Redirecting...' : 'Admin Sign in with PingOne Core'}
                 </button>
               </div>
 
@@ -108,7 +108,7 @@ const Login = () => {
                   className="btn btn-danger oauth-btn"
                   disabled={loading}
                 >
-                  {loading ? 'Redirecting...' : 'Customer Sign in with P1AIC'}
+                  {loading ? 'Redirecting...' : 'Customer Sign in with PingOne Core'}
                 </button>
               </div>
             </div>
@@ -116,7 +116,7 @@ const Login = () => {
 
           <div className="login-footer">
             <p>
-              <strong>P1AIC OAuth Authentication</strong><br />
+              <strong>PingOne Core OAuth Authentication</strong><br />
               Secure enterprise-grade authentication powered by PingOne Advanced Identity Cloud
             </p>
           </div>

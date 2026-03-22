@@ -3,9 +3,10 @@
  * Integrates agent token validation and authorization challenge responses into MCP message processing
  */
 
+import axios, { AxiosError } from 'axios';
 import { MCPResponse, ToolCallResponse, AuthorizationRequest } from '../interfaces/mcp';
 import { BankingAuthenticationManager } from '../auth/BankingAuthenticationManager';
-import { BankingSessionManager, BankingSession } from '../storage/BankingSessionManager';
+import { BankingSessionManager, BankingSession, UserTokens, CIBAPendingRequest } from '../storage/BankingSessionManager';
 import { AuthenticationError, AuthErrorCodes, AgentTokenInfo } from '../interfaces/auth';
 
 export interface AuthenticationResult {
@@ -21,6 +22,16 @@ export interface AuthorizationChallengeResponse {
   scope: string;
   sessionId: string;
   instructions: string;
+}
+
+/** Returned by initiateCIBAAuth — caller uses auth_req_id to poll. */
+export interface CIBAChallenge {
+  type: 'ciba';
+  auth_req_id: string;
+  expires_in: number;
+  poll_interval: number;
+  /** Human-readable message to show in the chat UI. */
+  message: string;
 }
 
 export class AuthenticationIntegration {
@@ -484,5 +495,127 @@ export class AuthenticationIntegration {
         availableScopes: []
       };
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // CIBA — Client-Initiated Backchannel Authentication
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Initiate a CIBA auth request.  Returns the challenge details so the caller
+   * can record the auth_req_id and either poll or inform the user.
+   */
+  async initiateCIBAAuth(userEmail: string, requiredScope: string, sessionId: string): Promise<CIBAChallenge> {
+    const bindingMessage =
+      process.env.CIBA_BINDING_MESSAGE || `Banking App – AI Assistant access (${requiredScope})`;
+
+    const cibaEndpoint = this.authManager.getCIBAEndpoint();
+    const credentials = this.authManager.getClientCredentials();
+
+    const params = new URLSearchParams({
+      login_hint: userEmail,
+      scope: `openid profile email ${requiredScope}`,
+      binding_message: bindingMessage,
+    });
+
+    const response = await axios.post(cibaEndpoint, params.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${credentials}`,
+      },
+      timeout: 10000,
+    });
+
+    const { auth_req_id, expires_in, interval } = response.data as any;
+    const pollInterval: number = interval || 5;
+
+    // Persist the request in session manager so MCPMessageHandler can poll it later
+    const pending: CIBAPendingRequest = {
+      authReqId: auth_req_id,
+      initiatedAt: Date.now(),
+      expiresAt: Date.now() + (expires_in || 300) * 1000,
+      interval: pollInterval,
+      userEmail,
+      requiredScope,
+    };
+    this.sessionManager.storeCIBARequest(sessionId, pending);
+
+    console.log(`[AuthenticationIntegration] CIBA initiated for ${userEmail.replace(/(.{2}).*@/, '$1***@')}, auth_req_id: ${auth_req_id}`);
+
+    return {
+      type: 'ciba',
+      auth_req_id,
+      expires_in: expires_in || 300,
+      poll_interval: pollInterval,
+      message: '📱 A push notification has been sent to your registered device. Please tap **Approve** to continue.',
+    };
+  }
+
+  /**
+   * Poll PingOne token endpoint until the user approves (or denies / request expires).
+   * Non-blocking at the event-loop level — other requests continue while this awaits.
+   */
+  async waitForCIBAApproval(sessionId: string, authReqId: string): Promise<UserTokens> {
+    const request = this.sessionManager.getCIBARequest(sessionId, authReqId);
+    if (!request) {
+      throw new Error('Unknown or expired CIBA request');
+    }
+
+    const tokenEndpoint = this.authManager.getTokenEndpoint();
+    const credentials = this.authManager.getClientCredentials();
+    const maxWait = parseInt(process.env.CIBA_MAX_WAIT_SECONDS || '300', 10) * 1000;
+    const deadline = Math.min(request.expiresAt, Date.now() + maxWait);
+
+    let intervalMs = (parseInt(process.env.CIBA_POLL_INTERVAL_MS || '5000', 10));
+
+    while (Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+
+      try {
+        const tokenParams = new URLSearchParams({
+          grant_type: 'urn:openid:params:grant-type:ciba',
+          auth_req_id: authReqId,
+        });
+
+        const tokenResponse = await axios.post(tokenEndpoint, tokenParams.toString(), {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': `Basic ${credentials}`,
+          },
+          timeout: 10000,
+        });
+
+        const data = tokenResponse.data as any;
+        this.sessionManager.deleteCIBARequest(sessionId, authReqId);
+
+        console.log(`[AuthenticationIntegration] CIBA approved for session ${sessionId}`);
+
+        return {
+          accessToken:  data.access_token,
+          refreshToken: data.refresh_token || '',
+          tokenType:    data.token_type || 'Bearer',
+          expiresIn:    data.expires_in || 3600,
+          scope:        data.scope || request.requiredScope,
+          issuedAt:     new Date(),
+        };
+
+      } catch (err) {
+        const axiosErr = err as AxiosError;
+        const errorCode = (axiosErr.response?.data as any)?.error;
+
+        if (errorCode === 'authorization_pending') continue;
+        if (errorCode === 'slow_down') {
+          intervalMs = Math.min(intervalMs + 5000, 30000);
+          continue;
+        }
+
+        // access_denied, expired_token, invalid_grant — abort
+        this.sessionManager.deleteCIBARequest(sessionId, authReqId);
+        throw err;
+      }
+    }
+
+    this.sessionManager.deleteCIBARequest(sessionId, authReqId);
+    throw new Error('CIBA authentication timed out — user did not respond in time');
   }
 }

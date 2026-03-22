@@ -59,6 +59,9 @@ class LangChainConfig:
     verbose: bool = False
     max_iterations: int = 10
     max_execution_time: int = 60  # seconds
+    # WebSocket streaming: MCP tool lifecycle + optional LLM token deltas (ChatOpenAI only)
+    stream_mcp_tool_events: bool = True
+    stream_llm_tokens: bool = True
 
 
 @dataclass
@@ -335,7 +338,9 @@ class ConfigManager:
             openai_api_key=self._get_required_env("OPENAI_API_KEY", file_config, defaults),
             verbose=get_env_value("LANGCHAIN_VERBOSE", "false").lower() == "true",
             max_iterations=int(get_env_value("LANGCHAIN_MAX_ITERATIONS", "10")),
-            max_execution_time=int(get_env_value("LANGCHAIN_MAX_EXECUTION_TIME", "60"))
+            max_execution_time=int(get_env_value("LANGCHAIN_MAX_EXECUTION_TIME", "60")),
+            stream_mcp_tool_events=get_env_value("LANGCHAIN_STREAM_MCP_TOOL_EVENTS", "true").lower() == "true",
+            stream_llm_tokens=get_env_value("LANGCHAIN_STREAM_LLM_TOKENS", "true").lower() == "true",
         )
         
         # Chat configuration

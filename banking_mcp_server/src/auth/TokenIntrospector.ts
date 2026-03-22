@@ -114,12 +114,23 @@ export class TokenIntrospector {
     // Extract scopes from token
     const scopes = tokenInfo.scope ? tokenInfo.scope.split(' ') : [];
 
+    // RFC 8693 §4.1 — log act claim for audit trail.
+    // `act` is present on tokens issued via token exchange and identifies the
+    // actor (BFF or AI agent) that performed the exchange on behalf of `sub`.
+    const actorClientId = tokenInfo.act?.client_id;
+    if (actorClientId) {
+      console.log(`[TokenIntrospector] Delegated token — actor: ${actorClientId}, subject: ${tokenInfo.sub}`);
+    } else {
+      console.log(`[TokenIntrospector] Direct token — subject: ${tokenInfo.sub} (no act claim)`);
+    }
+
     return {
       tokenHash: this.hashToken(token),
       clientId: tokenInfo.client_id || 'unknown',
-      scopes: scopes,
-      expiresAt: tokenInfo.exp ? new Date(tokenInfo.exp * 1000) : new Date(Date.now() + 3600000), // Default 1 hour
-      isValid: true
+      scopes,
+      expiresAt: tokenInfo.exp ? new Date(tokenInfo.exp * 1000) : new Date(Date.now() + 3600000),
+      isValid: true,
+      actorClientId,
     };
   }
 

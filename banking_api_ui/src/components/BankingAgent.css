@@ -658,6 +658,49 @@
   color: #161616;
 }
 
+/* ─── Configured state: green check on config button ─────────────────── */
+.banking-agent-config-done {
+  background: #defbe6;
+  color: #198038;
+  border-color: #42be65;
+}
+
+.banking-agent-config-done:hover {
+  background: #c6efce;
+  color: #0e6027;
+}
+
+/* ─── "Next → Sign in" divider label ─────────────────────────────────── */
+.banking-agent-next-step {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+.banking-agent-next-step::before,
+.banking-agent-next-step::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #42be65;
+  opacity: 0.5;
+}
+
+.banking-agent-next-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #198038;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ─── Login buttons glow when config is done ─────────────────────────── */
+.banking-agent-login-ready {
+  box-shadow: 0 0 0 2px #42be65;
+}
+
 /* ─── Responsive: full-width on very small screens ───────────────────── */
 @media (max-width: 420px) {
   .banking-agent-panel {

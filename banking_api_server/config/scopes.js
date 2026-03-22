@@ -142,8 +142,8 @@ const ROUTE_SCOPE_MAP = {
 
 // OAuth provider scope configuration templates
 const OAUTH_PROVIDER_SCOPE_CONFIGS = {
-  // P1AIC (PingOne Advanced Identity Cloud) scope configuration
-  p1aic: {
+  // PingOne Core (PingOne Advanced Identity Cloud) scope configuration
+  pingone_ai_core: {
     // Admin client scopes
     adminClient: {
       defaultScopes: ['openid', 'profile', 'email'],
@@ -202,8 +202,8 @@ const isValidScope = (scope) => {
 };
 
 // Get OAuth provider configuration
-const getOAuthProviderConfig = (provider = 'p1aic') => {
-  return OAUTH_PROVIDER_SCOPE_CONFIGS[provider] || OAUTH_PROVIDER_SCOPE_CONFIGS.p1aic;
+const getOAuthProviderConfig = (provider = 'pingone_ai_core') => {
+  return OAUTH_PROVIDER_SCOPE_CONFIGS[provider] || OAUTH_PROVIDER_SCOPE_CONFIGS.pingone_ai_core;
 };
 
 module.exports = {

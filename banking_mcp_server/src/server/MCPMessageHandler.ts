@@ -27,6 +27,10 @@ export interface MessageHandlerContext {
   connectionId: string;
   agentToken?: string;
   session?: BankingSession;
+  /** Authenticated user email, injected from the frontend at connection time. Used for CIBA. */
+  userEmail?: string;
+  /** Send a non-response notification to the connected client (e.g. CIBA progress). */
+  sendNotification?: (notification: object) => void;
 }
 
 export class MCPMessageHandler {
@@ -240,10 +244,64 @@ export class MCPMessageHandler {
 
       if (!authResult.success) {
         if (authResult.authChallenge) {
-          console.log(`[MCPMessageHandler] Returning authorization challenge`);
-          const challengeResponse = this.authIntegration.createAuthorizationChallengeResponse(String(message.id ?? 'unknown'), authResult.authChallenge);
-          console.log(`[MCPMessageHandler] Authorization challenge response:`, JSON.stringify(challengeResponse, null, 2));
-          return challengeResponse;
+          // --- CIBA: use push notification when the user's email is available ---
+          const userEmail = context.userEmail
+            || (context.session ? this.sessionManager.getSessionEmail(context.session.sessionId) : undefined);
+          const cibaEnabled = process.env.CIBA_ENABLED === 'true';
+
+          if (cibaEnabled && userEmail && context.session) {
+            try {
+              const requiredScope = requiredScopes.join(' ') || authResult.authChallenge.scope;
+              console.log(`[MCPMessageHandler] CIBA flow: initiating for ${userEmail.replace(/(.{2}).*@/, '$1***@')}`);
+
+              const cibaChallenge = await this.authIntegration.initiateCIBAAuth(
+                userEmail,
+                requiredScope,
+                context.session.sessionId
+              );
+
+              // Inform the user via a non-blocking notification on the WebSocket
+              if (context.sendNotification) {
+                context.sendNotification({
+                  type: 'ciba_pending',
+                  auth_req_id: cibaChallenge.auth_req_id,
+                  message: cibaChallenge.message,
+                  expires_in: cibaChallenge.expires_in,
+                });
+              }
+
+              // Block this coroutine (not the event loop) until the user approves
+              const userTokens = await this.authIntegration.waitForCIBAApproval(
+                context.session.sessionId,
+                cibaChallenge.auth_req_id
+              );
+
+              // Store the newly issued tokens in the session
+              await this.sessionManager.associateUserTokens(context.session.sessionId, userTokens);
+
+              // Re-fetch the updated session so the tool runs with valid tokens
+              const refreshedSession = await this.sessionManager.getSession(context.session.sessionId);
+              if (refreshedSession) context.session = refreshedSession;
+
+              console.log(`[MCPMessageHandler] CIBA approved — re-executing tool '${toolName}' with new tokens`);
+              // Fall through — tool execution continues below
+
+            } catch (cibaErr) {
+              const cibaErrMsg = cibaErr instanceof Error ? cibaErr.message : String(cibaErr);
+              console.warn(`[MCPMessageHandler] CIBA failed for tool '${toolName}': ${cibaErrMsg}`);
+              // Fall back to redirect challenge
+              console.log(`[MCPMessageHandler] Falling back to redirect challenge`);
+              const challengeResponse = this.authIntegration.createAuthorizationChallengeResponse(String(message.id ?? 'unknown'), authResult.authChallenge);
+              return challengeResponse;
+            }
+
+          } else {
+            // No email or CIBA disabled — return the standard redirect challenge
+            console.log(`[MCPMessageHandler] Returning authorization challenge (CIBA not available)`);
+            const challengeResponse = this.authIntegration.createAuthorizationChallengeResponse(String(message.id ?? 'unknown'), authResult.authChallenge);
+            console.log(`[MCPMessageHandler] Authorization challenge response:`, JSON.stringify(challengeResponse, null, 2));
+            return challengeResponse;
+          }
         } else {
           console.log(`[MCPMessageHandler] Returning authentication error:`, authResult.error);
           const errorResponse = this.authIntegration.createAuthenticationErrorResponse(String(message.id ?? 'unknown'), authResult.error || 'Authentication failed') as ToolCallResponse;

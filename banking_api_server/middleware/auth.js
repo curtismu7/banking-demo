@@ -447,8 +447,8 @@ const logTokenInfo = (token, context = '') => {
 
 
 // Validate a PingOne access token using JWKS (JWT signature verification).
-// Replaces the previous P1AIC/ForgeRock introspection approach.
-const validateP1AICToken = async (token, requestContext = {}) => {
+// Replaces the previous PingOne Core/ForgeRock introspection approach.
+const validatePingOneCoreToken = async (token, requestContext = {}) => {
   const { method = 'UNKNOWN', path = 'UNKNOWN' } = requestContext;
 
   logger.debug(LOG_CATEGORIES.OAUTH_VALIDATION, 'Starting PingOne token validation', {
@@ -551,7 +551,7 @@ const authenticateToken = async (req, res, next) => {
         // (the rest of the function uses `token` — update it via closure workaround)
         // We reassign token here by falling through to the try block below with the session token.
         try {
-          const { valid, decoded, error } = await validateP1AICToken(sessionTokenExtracted, requestContext);
+          const { valid, decoded, error } = await validatePingOneCoreToken(sessionTokenExtracted, requestContext);
           if (!valid) {
             logger.error(LOG_CATEGORIES.AUTHENTICATION, 'Session OAuth token validation failed', {
               ...requestContext,
@@ -619,7 +619,7 @@ const authenticateToken = async (req, res, next) => {
 
     try {
       // Validate OAuth token with enhanced error handling
-      const { valid, decoded, error } = await validateP1AICToken(token, requestContext);
+      const { valid, decoded, error } = await validatePingOneCoreToken(token, requestContext);
       
       if (!valid) {
         logger.error(LOG_CATEGORIES.AUTHENTICATION, 'OAuth token validation failed', {
@@ -628,7 +628,7 @@ const authenticateToken = async (req, res, next) => {
           error_message: error?.message || 'Unknown validation error'
         });
         
-        // The error should already be an OAuthError from validateP1AICToken
+        // The error should already be an OAuthError from validatePingOneCoreToken
         throw error;
       }
 

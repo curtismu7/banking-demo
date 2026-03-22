@@ -384,6 +384,13 @@ const Dashboard = ({ user, onLogout }) => {
           >
             🔒 Security Settings
           </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => (window.location.href = '/mcp-inspector')}
+            title="MCP discovery & tools/call via BFF"
+          >
+            🔌 MCP Inspector
+          </button>
         </div>
       </div>
 

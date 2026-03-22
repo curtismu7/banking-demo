@@ -21,6 +21,18 @@ function getOrigin(req) {
 }
 
 /**
+ * Derive the OAuth redirect URI for the end-user flow.
+ * Priority:
+ *   1. configStore user_redirect_uri / PINGONE_CORE_USER_REDIRECT_URI env var (explicit override)
+ *   2. On Vercel: derived from request host — works on any Vercel deployment URL automatically
+ *   3. Local dev fallback: http://localhost:3001 (server port, not React port)
+ */
+function getRedirectUri(req) {
+  return configStore.getEffective('user_redirect_uri')
+    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}/api/auth/oauth/user/callback` : 'http://localhost:3001/api/auth/oauth/user/callback');
+}
+
+/**
  * Create sample accounts and transactions for new customers
  */
 async function createSampleDataForCustomer(userId, firstName, lastName) {
@@ -132,14 +144,16 @@ router.get('/login', (req, res) => {
 
     const state = oauthService.generateState();
     const codeVerifier = oauthService.generateCodeVerifier();
-    const url = oauthService.generateAuthorizationUrl(state, codeVerifier);
-    
-    // Store state and verifier in session for CSRF protection and PKCE
+    const redirectUri = getRedirectUri(req);
+    const url = oauthService.generateAuthorizationUrl(state, codeVerifier, {}, redirectUri);
+
+    // Store state, verifier and redirect URI in session for CSRF protection and PKCE
     req.session.oauthState = state;
     req.session.oauthCodeVerifier = codeVerifier;
+    req.session.oauthRedirectUri = redirectUri;
     req.session.oauthType = 'user'; // Distinguish from admin OAuth
     
-    console.log('Redirecting end user to P1AIC:', url);
+    console.log('Redirecting end user to PingOne Core:', url);
     res.redirect(url);
   } catch (error) {
     console.error('OAuth login error:', error);
@@ -172,18 +186,20 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${getOrigin(req)}/login?error=no_code`);
     }
     
-    // Retrieve and clear the PKCE code verifier from session
+    // Retrieve and clear the PKCE code verifier and redirect URI from session
     const codeVerifier = req.session.oauthCodeVerifier;
+    const redirectUri = req.session.oauthRedirectUri;
     delete req.session.oauthCodeVerifier;
+    delete req.session.oauthRedirectUri;
     delete req.session.oauthState;
 
     // Exchange code for token (with PKCE verifier)
-    const tokenData = await oauthService.exchangeCodeForToken(code, codeVerifier);
+    const tokenData = await oauthService.exchangeCodeForToken(code, codeVerifier, redirectUri);
     console.log('Token received for end user');
     
-    // Get user information from P1AIC
+    // Get user information from PingOne Core
     const userInfo = await oauthService.getUserInfo(tokenData.access_token);
-    console.log('User info from P1AIC:', JSON.stringify(userInfo, null, 2));
+    console.log('User info from PingOne Core:', JSON.stringify(userInfo, null, 2));
     
     // Create user object from OAuth data
     const oauthUser = oauthService.createUserFromOAuth(userInfo);
@@ -335,11 +351,13 @@ router.get('/stepup', (req, res) => {
 
     const state = oauthService.generateState();
     const codeVerifier = oauthService.generateCodeVerifier();
-    const url = oauthService.generateAuthorizationUrl(state, codeVerifier, { acr_values: acrValue });
+    const redirectUri = getRedirectUri(req);
+    const url = oauthService.generateAuthorizationUrl(state, codeVerifier, { acr_values: acrValue }, redirectUri);
 
-    // Persist PKCE + state + where to go after MFA
+    // Persist PKCE + state + redirect URI + where to go after MFA
     req.session.oauthState = state;
     req.session.oauthCodeVerifier = codeVerifier;
+    req.session.oauthRedirectUri = redirectUri;
     req.session.oauthType = 'user';
     req.session.stepUpReturnTo = `${returnTo}?stepup=done`;
 

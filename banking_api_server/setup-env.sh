@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# P1AIC OAuth Environment Setup Script
+# PingOne AI Core OAuth Environment Setup Script
 # This script helps you set up your environment configuration
 
-echo "🚀 P1AIC OAuth Environment Setup"
+echo "🚀 PingOne AI Core OAuth Environment Setup"
 echo "=================================="
 
 # Check if .env already exists
@@ -37,15 +37,15 @@ fi
 echo "✅ Environment file created successfully!"
 echo ""
 echo "📝 Next steps:"
-echo "1. Edit .env file and replace placeholder values with your P1AIC configuration"
-echo "2. Configure your P1AIC OAuth2 client (see P1AIC_SETUP.md for details)"
+echo "1. Edit .env file and replace placeholder values with your PingOne AI Core configuration"
+echo "2. Configure your PingOne AI Core OAuth2 client (see PINGONE_AI_CORE_SETUP.md for details)"
 echo "3. Run 'npm install' to install dependencies"
 echo "4. Run 'npm start' to start the server"
 echo ""
-echo "🔧 Required P1AIC configuration:"
+echo "🔧 Required PingOne AI Core configuration:"
 echo "   - Tenant name"
 echo "   - OAuth2 client ID"
 echo "   - OAuth2 client secret"
 echo "   - Redirect URI: http://localhost:3001/api/auth/oauth/callback"
 echo ""
-echo "📚 For detailed setup instructions, see P1AIC_SETUP.md"
+echo "📚 For detailed setup instructions, see PINGONE_AI_CORE_SETUP.md"

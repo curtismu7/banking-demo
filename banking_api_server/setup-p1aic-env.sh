@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# P1AIC OAuth Configuration Setup Script
-# This script helps set up environment variables for P1AIC OAuth integration
+# PingOne AI Core OAuth Configuration Setup Script
+# This script helps set up environment variables for PingOne AI Core OAuth integration
 
-echo "🔐 P1AIC OAuth Configuration Setup"
+echo "🔐 PingOne AI Core OAuth Configuration Setup"
 echo "=================================="
 echo ""
 
@@ -16,41 +16,41 @@ else
 fi
 
 echo ""
-echo "Please provide your P1AIC configuration:"
+echo "Please provide your PingOne AI Core configuration:"
 echo ""
 
 # Get tenant name
-if [ -z "$P1AIC_TENANT_NAME" ]; then
-    read -p "Enter your P1AIC tenant name: " P1AIC_TENANT_NAME
+if [ -z "$PINGONE_AI_CORE_TENANT_NAME" ]; then
+    read -p "Enter your PingOne AI Core tenant name: " PINGONE_AI_CORE_TENANT_NAME
 else
-    echo "Current P1AIC tenant name: $P1AIC_TENANT_NAME"
+    echo "Current PingOne AI Core tenant name: $PINGONE_AI_CORE_TENANT_NAME"
     read -p "Press Enter to keep current value or type new value: " NEW_TENANT_NAME
     if [ ! -z "$NEW_TENANT_NAME" ]; then
-        P1AIC_TENANT_NAME=$NEW_TENANT_NAME
+        PINGONE_AI_CORE_TENANT_NAME=$NEW_TENANT_NAME
     fi
 fi
 
 # Get client ID
-if [ -z "$P1AIC_CLIENT_ID" ]; then
-    read -p "Enter your P1AIC client ID: " P1AIC_CLIENT_ID
+if [ -z "$PINGONE_AI_CORE_CLIENT_ID" ]; then
+    read -p "Enter your PingOne AI Core client ID: " PINGONE_AI_CORE_CLIENT_ID
 else
-    echo "Current P1AIC client ID: $P1AIC_CLIENT_ID"
+    echo "Current PingOne AI Core client ID: $PINGONE_AI_CORE_CLIENT_ID"
     read -p "Press Enter to keep current value or type new value: " NEW_CLIENT_ID
     if [ ! -z "$NEW_CLIENT_ID" ]; then
-        P1AIC_CLIENT_ID=$NEW_CLIENT_ID
+        PINGONE_AI_CORE_CLIENT_ID=$NEW_CLIENT_ID
     fi
 fi
 
 # Get client secret
-if [ -z "$P1AIC_CLIENT_SECRET" ]; then
-    read -s -p "Enter your P1AIC client secret: " P1AIC_CLIENT_SECRET
+if [ -z "$PINGONE_AI_CORE_CLIENT_SECRET" ]; then
+    read -s -p "Enter your PingOne AI Core client secret: " PINGONE_AI_CORE_CLIENT_SECRET
     echo ""
 else
-    echo "Current P1AIC client secret: [hidden]"
+    echo "Current PingOne AI Core client secret: [hidden]"
     read -s -p "Press Enter to keep current value or type new value: " NEW_CLIENT_SECRET
     echo ""
     if [ ! -z "$NEW_CLIENT_SECRET" ]; then
-        P1AIC_CLIENT_SECRET=$NEW_CLIENT_SECRET
+        PINGONE_AI_CORE_CLIENT_SECRET=$NEW_CLIENT_SECRET
     fi
 fi
 
@@ -71,10 +71,10 @@ fi
 # Write to .env file
 echo "📝 Writing configuration to .env file..."
 cat > .env << EOF
-# P1AIC OAuth Configuration
-P1AIC_TENANT_NAME=$P1AIC_TENANT_NAME
-P1AIC_CLIENT_ID=$P1AIC_CLIENT_ID
-P1AIC_CLIENT_SECRET=$P1AIC_CLIENT_SECRET
+# PingOne AI Core OAuth Configuration
+PINGONE_AI_CORE_TENANT_NAME=$PINGONE_AI_CORE_TENANT_NAME
+PINGONE_AI_CORE_CLIENT_ID=$PINGONE_AI_CORE_CLIENT_ID
+PINGONE_AI_CORE_CLIENT_SECRET=$PINGONE_AI_CORE_CLIENT_SECRET
 
 # MCP Server Configuration
 MCP_SERVER_URL=$MCP_SERVER_URL
@@ -83,19 +83,19 @@ EOF
 echo ""
 echo "✅ Configuration saved to .env file"
 echo ""
-echo "🔗 P1AIC OAuth endpoints:"
-echo "   Authorization: https://openam-${P1AIC_TENANT_NAME}.forgeblocks.com/am/oauth2/realms/root/realms/alpha/authorize"
-echo "   Token: https://openam-${P1AIC_TENANT_NAME}.forgeblocks.com/am/oauth2/realms/root/realms/alpha/access_token"
-echo "   Registration: https://openam-${P1AIC_TENANT_NAME}.forgeblocks.com/am/oauth2/realms/root/realms/alpha/connect/register"
+echo "🔗 PingOne AI Core OAuth endpoints:"
+echo "   Authorization: https://openam-${PINGONE_AI_CORE_TENANT_NAME}.forgeblocks.com/am/oauth2/realms/root/realms/alpha/authorize"
+echo "   Token: https://openam-${PINGONE_AI_CORE_TENANT_NAME}.forgeblocks.com/am/oauth2/realms/root/realms/alpha/access_token"
+echo "   Registration: https://openam-${PINGONE_AI_CORE_TENANT_NAME}.forgeblocks.com/am/oauth2/realms/root/realms/alpha/connect/register"
 echo ""
-echo "🚀 To run the MCP server with P1AIC OAuth:"
+echo "🚀 To run the MCP server with PingOne AI Core OAuth:"
 echo "   source .env && npx tsx src/examples/server/simpleStreamableHttp.ts --oauth"
 echo ""
-echo "🚀 To run the MCP client with P1AIC OAuth:"
+echo "🚀 To run the MCP client with PingOne AI Core OAuth:"
 echo "   source .env && npx tsx src/examples/client/simpleOAuthClient.ts"
 echo ""
-echo "📋 Make sure to configure the following in your P1AIC tenant:"
-echo "   - Client ID: $P1AIC_CLIENT_ID"
+echo "📋 Make sure to configure the following in your PingOne AI Core tenant:"
+echo "   - Client ID: $PINGONE_AI_CORE_CLIENT_ID"
 echo "   - Redirect URI: http://localhost:8090/callback"
 echo "   - Grant types: authorization_code, refresh_token"
 echo "   - Response types: code"

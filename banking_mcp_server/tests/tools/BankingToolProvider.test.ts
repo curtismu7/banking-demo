@@ -487,7 +487,7 @@ describe('BankingToolProvider', () => {
             role: 'customer',
             isActive: true,
             createdAt: '2023-01-01T00:00:00Z',
-            oauthProvider: 'p1AIC',
+            oauthProvider: 'pingone_ai_core',
             oauthId: 'oauth_123'
           },
           exists: true,
@@ -515,7 +515,7 @@ describe('BankingToolProvider', () => {
         expect(responseData.user.role).toBe('customer');
         expect(responseData.user.isActive).toBe(true);
         expect(responseData.user.createdAt).toBe('2023-01-01T00:00:00Z');
-        expect(responseData.user.oauthProvider).toBe('p1AIC');
+        expect(responseData.user.oauthProvider).toBe('pingone_ai_core');
         expect(responseData.queriedBy).toBe('ai_agent_test');
         expect(responseData.queriedAt).toBe('2023-01-01T12:00:00Z');
         expect(mockApiClient.queryUserByEmail).toHaveBeenCalledWith('valid_access_token', 'john.doe@example.com');
@@ -583,7 +583,7 @@ describe('BankingToolProvider', () => {
             role: 'customer',
             isActive: true,
             createdAt: '2023-01-01T00:00:00Z',
-            oauthProvider: 'p1AIC',
+            oauthProvider: 'pingone_ai_core',
             oauthId: 'oauth_456'
           },
           exists: true,

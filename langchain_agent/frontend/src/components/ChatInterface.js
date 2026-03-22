@@ -117,19 +117,106 @@ const ChatInterface = ({ apiUrl, onDashboardRefresh }) => {
   // Handle incoming WebSocket messages
   useEffect(() => {
     if (lastMessage) {
-      if (lastMessage.type === 'chat_response') {
+      if (lastMessage.type === 'stream_event') {
+        const sid = lastMessage.session_id;
+        if (sid && sessionIdRef.current && sid !== sessionIdRef.current) {
+          return;
+        }
+        const { event, tool, token, output_preview: preview, error: toolErr } = lastMessage;
+
+        if (event === 'tool_start' && tool) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `tool-${Date.now()}-${tool}`,
+              content: `🔧 **${tool}** …`,
+              role: 'assistant',
+              timestamp: new Date().toISOString(),
+              metadata: { streaming: true, kind: 'tool_status', tool },
+            },
+          ]);
+        } else if (event === 'tool_end') {
+          setMessages((prev) => {
+            const i = [...prev].reverse().findIndex(
+              (m) => m.metadata?.kind === 'tool_status' && m.metadata?.streaming
+            );
+            if (i === -1) return prev;
+            const realIdx = prev.length - 1 - i;
+            const row = prev[realIdx];
+            const suffix = preview ? `\n${preview}` : ' ✓';
+            const next = [...prev];
+            next[realIdx] = {
+              ...row,
+              content: `${row.content.replace(/\s*…\s*$/, '')}${suffix}`,
+              metadata: { ...row.metadata, streaming: false },
+            };
+            return next;
+          });
+        } else if (event === 'tool_error' && toolErr) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `tool-err-${Date.now()}`,
+              content: `⚠️ Tool error: ${toolErr}`,
+              role: 'assistant',
+              timestamp: new Date().toISOString(),
+              metadata: { error: true, kind: 'tool_error' },
+            },
+          ]);
+        } else if (event === 'llm_token' && token) {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.metadata?.kind === 'llm_stream' && last?.metadata?.streaming) {
+              const copy = [...prev];
+              copy[copy.length - 1] = {
+                ...last,
+                content: last.content + token,
+              };
+              return copy;
+            }
+            return [
+              ...prev,
+              {
+                id: `llm-stream-${Date.now()}`,
+                content: token,
+                role: 'assistant',
+                timestamp: new Date().toISOString(),
+                metadata: { streaming: true, kind: 'llm_stream' },
+              },
+            ];
+          });
+        }
+      } else if (lastMessage.type === 'chat_response') {
+        const finalContent = lastMessage.content;
         const agentMessage = {
           id: Date.now().toString(),
-          content: lastMessage.content,
+          content: finalContent,
           role: 'assistant',
           timestamp: lastMessage.timestamp || new Date().toISOString(),
-          metadata: lastMessage.metadata || {}
+          metadata: { ...(lastMessage.metadata || {}), streaming: false, kind: 'final' },
         };
-        setMessages(prev => [...prev, agentMessage]);
+        setMessages((prev) => {
+          let idx = -1;
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            if (prev[i].metadata?.kind === 'llm_stream') {
+              idx = i;
+              break;
+            }
+          }
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = {
+              ...next[idx],
+              content: finalContent,
+              metadata: { ...agentMessage.metadata },
+            };
+            return next;
+          }
+          return [...prev, agentMessage];
+        });
         setIsLoading(false);
-        
-        // Check if this message indicates a banking operation that should refresh the dashboard
-        detectAndRefreshDashboard(lastMessage.content);
+
+        detectAndRefreshDashboard(finalContent);
       } else if (lastMessage.type === 'authorization_required') {
         // Handle authorization request
         setAuthModal({

@@ -68,6 +68,7 @@ router.get('/', async (req, res) => {
       config:       configStore.getMasked(),
       isConfigured: configStore.isConfigured(),
       storageType:  configStore.getStorageType(),
+      readOnly:     configStore.isReadOnly(),
     });
   } catch (err) {
     console.error('[adminConfig] GET error:', err.message);
@@ -80,6 +81,12 @@ router.get('/', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/', requireAdminOrUnconfigured, async (req, res) => {
+  if (process.env.VERCEL) {
+    return res.status(403).json({
+      error:   'read_only',
+      message: 'Configuration is managed by environment variables in this deployment and cannot be changed at runtime.',
+    });
+  }
   try {
     const data = req.body;
     if (!data || typeof data !== 'object') {
@@ -162,6 +169,12 @@ router.post('/test', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/reset', async (req, res) => {
+  if (process.env.VERCEL) {
+    return res.status(403).json({
+      error:   'read_only',
+      message: 'Configuration is managed by environment variables in this deployment.',
+    });
+  }
   if (!isAdminSession(req)) {
     return res.status(401).json({ error: 'unauthorized', message: 'Admin session required.' });
   }

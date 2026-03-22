@@ -8,6 +8,7 @@ import {
   createDeposit,
   createWithdrawal,
 } from '../services/bankingAgentService';
+import { loadPublicConfig } from '../services/configService';
 import './BankingAgent.css';
 
 // ─── Action definitions ────────────────────────────────────────────────────────
@@ -127,10 +128,20 @@ export default function BankingAgent({ user }) {
   const [activeAction, setActiveAction] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isConfigured, setIsConfigured] = useState(null);
   const bottomRef = useRef(null);
   const navigate = useNavigate();
 
   const isLoggedIn = !!user;
+
+  // Check config status from IndexedDB cache whenever panel opens
+  useEffect(() => {
+    if (isOpen && !isLoggedIn) {
+      loadPublicConfig().then(cfg => {
+        setIsConfigured(!!(cfg.pingone_environment_id && cfg.admin_client_id));
+      }).catch(() => setIsConfigured(false));
+    }
+  }, [isOpen, isLoggedIn]);
 
   useEffect(() => {
     if (isOpen) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -236,7 +247,11 @@ export default function BankingAgent({ user }) {
                 <p>
                   {isLoggedIn
                     ? 'Select an action below to interact with your accounts via the MCP server.'
-                    : 'Welcome to SecureBank. Please sign in to access your accounts.'}
+                    : isConfigured
+                      ? 'PingOne is configured. Sign in to get started.'
+                      : isConfigured === false
+                        ? 'Set up your PingOne credentials to get started.'
+                        : 'Welcome to SecureBank. Please sign in to access your accounts.'}
                 </p>
               </div>
             )}
@@ -285,24 +300,46 @@ export default function BankingAgent({ user }) {
                       {a.label}
                     </button>
                   ))
-                : LOGIN_ACTIONS.map(a => (
-                    <button
-                      key={a.id}
-                      className="banking-agent-action-btn banking-agent-login-btn"
-                      onClick={() => handleLoginAction(a.id)}
-                      title={a.desc}
-                    >
-                      {a.label}
-                    </button>
-                  ))
+                : (
+                    <>
+                      {/* Configure step */}
+                      <button
+                        className={`banking-agent-action-btn banking-agent-config-btn${isConfigured ? ' banking-agent-config-done' : ''}`}
+                        onClick={() => { setIsOpen(false); navigate('/config'); }}
+                        title="Open PingOne configuration settings"
+                      >
+                        {isConfigured ? '✅ Configured' : '⚙️ Configure PingOne'}
+                      </button>
+
+                      {/* Next-step hint + login buttons */}
+                      {isConfigured && (
+                        <div className="banking-agent-next-step">
+                          <span className="banking-agent-next-label">Next → Sign in</span>
+                        </div>
+                      )}
+                      {LOGIN_ACTIONS.map(a => (
+                        <button
+                          key={a.id}
+                          className={`banking-agent-action-btn banking-agent-login-btn${isConfigured ? ' banking-agent-login-ready' : ''}`}
+                          onClick={() => handleLoginAction(a.id)}
+                          title={a.desc}
+                          disabled={isConfigured === false}
+                        >
+                          {a.label}
+                        </button>
+                      ))}
+                    </>
+                  )
               }
-              <button
-                className="banking-agent-action-btn banking-agent-config-btn"
-                onClick={() => { setIsOpen(false); navigate('/config'); }}
-                title="Open PingOne configuration settings"
-              >
-                ⚙️ Configure
-              </button>
+              {isLoggedIn && (
+                <button
+                  className="banking-agent-action-btn banking-agent-config-btn"
+                  onClick={() => { setIsOpen(false); navigate('/config'); }}
+                  title="Open PingOne configuration settings"
+                >
+                  ⚙️ Configure
+                </button>
+              )}
             </div>
           )}
         </div>

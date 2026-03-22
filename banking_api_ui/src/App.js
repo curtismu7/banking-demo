@@ -14,6 +14,8 @@ import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
 import SecuritySettings from './components/SecuritySettings';
 import Config from './components/Config';
+import CIBAPanel from './components/CIBAPanel';
+import McpInspector from './components/McpInspector';
 import './App.css';
 
 function App() {
@@ -174,12 +176,14 @@ function App() {
                   <Route path="/accounts" element={user?.role === 'admin' ? <Accounts user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
                   <Route path="/transactions" element={user?.role === 'admin' ? <Transactions user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
                   <Route path="/settings" element={user?.role === 'admin' ? <SecuritySettings user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                  <Route path="/mcp-inspector" element={<McpInspector user={user} onLogout={logout} />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </main>
             )
           } />
         </Routes>
+        <CIBAPanel />
       </div>
     </Router>
   );

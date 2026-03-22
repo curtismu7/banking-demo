@@ -89,11 +89,11 @@ class OAuthUserService {
    * Generate authorization URL for end user OAuth flow.
    * Pass acr_values to trigger step-up MFA (e.g. 'Multi_factor' — must match the PingOne Sign-On Policy name).
    */
-  generateAuthorizationUrl(state, codeVerifier, options = {}) {
+  generateAuthorizationUrl(state, codeVerifier, options = {}, redirectUri) {
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.clientId,
-      redirect_uri: this.config.redirectUri,
+      redirect_uri: redirectUri || this.config.redirectUri,
       scope: this.config.scopes.join(' '),
       state: state,
       code_challenge: this.generateCodeChallenge(codeVerifier),
@@ -110,14 +110,14 @@ class OAuthUserService {
   /**
    * Exchange authorization code for access token
    */
-  async exchangeCodeForToken(code, codeVerifier) {
+  async exchangeCodeForToken(code, codeVerifier, redirectUri) {
     try {
       const response = await axios.post(this.config.tokenEndpoint, {
         grant_type: 'authorization_code',
         client_id: this.config.clientId,
         client_secret: this.config.clientSecret,
         code: code,
-        redirect_uri: this.config.redirectUri,
+        redirect_uri: redirectUri || this.config.redirectUri,
         code_verifier: codeVerifier
       }, {
         headers: {
@@ -138,7 +138,7 @@ class OAuthUserService {
   }
 
   /**
-   * Get user information from P1AIC
+   * Get user information from PingOne Core
    */
   async getUserInfo(accessToken) {
     try {
@@ -172,7 +172,7 @@ class OAuthUserService {
   }
 
   /**
-   * Create a user object from P1AIC user info (end users get customer role)
+   * Create a user object from PingOne Core user info (end users get customer role)
    */
   createUserFromOAuth(userInfo) {
     return {
@@ -184,7 +184,7 @@ class OAuthUserService {
       role: this.config.userRole, // End users get customer role
       isActive: true,
       createdAt: new Date(),
-      oauthProvider: 'p1AIC',
+      oauthProvider: 'pingone_ai_core',
       oauthId: userInfo.sub || userInfo.id
     };
   }

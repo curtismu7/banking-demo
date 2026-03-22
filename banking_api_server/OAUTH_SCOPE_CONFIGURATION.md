@@ -53,18 +53,18 @@ Access: Full banking operations with AI agent identification
 
 ### Core OAuth Configuration
 ```bash
-# P1AIC Tenant Configuration
-P1AIC_TENANT_NAME=your-tenant-name
+# PingOne Core Tenant Configuration
+PINGONE_CORE_TENANT_NAME=your-tenant-name
 
 # Admin OAuth2 Client Configuration
-P1AIC_CLIENT_ID=your-admin-client-id
-P1AIC_CLIENT_SECRET=your-admin-client-secret
-P1AIC_REDIRECT_URI=http://localhost:3001/api/auth/oauth/callback
+PINGONE_CORE_CLIENT_ID=your-admin-client-id
+PINGONE_CORE_CLIENT_SECRET=your-admin-client-secret
+PINGONE_CORE_REDIRECT_URI=http://localhost:3001/api/auth/oauth/callback
 
 # End User OAuth2 Client Configuration
-P1AIC_USER_CLIENT_ID=your-user-client-id
-P1AIC_USER_CLIENT_SECRET=your-user-client-secret
-P1AIC_USER_REDIRECT_URI=http://localhost:3001/api/auth/oauth/user/callback
+PINGONE_CORE_USER_CLIENT_ID=your-user-client-id
+PINGONE_CORE_USER_CLIENT_SECRET=your-user-client-secret
+PINGONE_CORE_USER_REDIRECT_URI=http://localhost:3001/api/auth/oauth/user/callback
 ```
 
 ### Scope Configuration Variables
@@ -153,7 +153,7 @@ TOKEN_CACHE_TTL=600
 
 ## OAuth Provider Configuration
 
-### P1AIC (PingOne Advanced Identity Cloud) Setup
+### PingOne Core (PingOne Advanced Identity Cloud) Setup
 
 #### Admin Client Configuration
 1. **Client Type**: Confidential
@@ -184,7 +184,7 @@ TOKEN_CACHE_TTL=600
 Configure your OAuth provider to assign scopes based on user roles:
 
 ```javascript
-// Example P1AIC scope assignment script
+// Example PingOne Core scope assignment script
 if (user.role === 'admin') {
   token.scope = 'openid profile email banking:admin banking:read banking:write banking:accounts:read banking:transactions:read banking:transactions:write';
 } else if (user.role === 'customer') {

@@ -268,8 +268,12 @@ class MessageProcessor:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
             
-            # Process message with agent (with real-time tracing)
-            response = await self.agent.process_message_with_tracing(chat_message.content, session_id)
+            # Process message with agent (with real-time tracing + optional WebSocket streaming)
+            response = await self.agent.process_message_with_tracing(
+                chat_message.content,
+                session_id,
+                stream_context={"websocket_handler": self.websocket_handler},
+            )
             
             # Stop typing indicator
             await self.websocket_handler.send_message_to_session(session_id, {

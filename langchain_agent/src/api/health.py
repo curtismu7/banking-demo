@@ -24,10 +24,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         """Handle GET requests."""
-        if self.path == "/health":
+        path = self.path.split("?", 1)[0]
+        if path == "/health":
             self._handle_health_check()
-        elif self.path == "/status":
+        elif path == "/status":
             self._handle_status_check()
+        elif path == "/inspector/mcp-host":
+            self._handle_mcp_host_inspector()
         else:
             self._send_response(404, {"error": "Not found"})
     
@@ -57,6 +60,17 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             "environment": self.app_status.get("environment", "unknown")
         }
         self._send_response(200, response)
+
+    def _handle_mcp_host_inspector(self):
+        """Demo: MCP Host (LangChain) — tools bound to the LLM and MCP client registry snapshot."""
+        payload = self.app_status.get("mcp_host_inspector")
+        if not payload:
+            self._send_response(503, {
+                "error": "inspector_not_ready",
+                "message": "Host inspector snapshot not populated yet (agent still starting).",
+            })
+            return
+        self._send_response(200, payload)
     
     def _send_response(self, status_code: int, data: Dict[str, Any]):
         """Send JSON response."""
@@ -106,6 +120,7 @@ class HealthCheckServer:
             logger.info(f"Health check server started on port {self.port}")
             logger.info(f"Health check: http://localhost:{self.port}/health")
             logger.info(f"Status check: http://localhost:{self.port}/status")
+            logger.info(f"MCP Host inspector: http://localhost:{self.port}/inspector/mcp-host")
             
         except Exception as e:
             logger.error(f"Failed to start health check server: {e}")

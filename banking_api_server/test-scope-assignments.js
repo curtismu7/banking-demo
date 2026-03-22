@@ -122,9 +122,9 @@ function testEnvironmentConfiguration() {
 function testOAuthProviderConfiguration() {
   console.log('\n🔐 Testing OAuth Provider Configuration...');
   
-  const providerConfig = getOAuthProviderConfig('p1aic');
+  const providerConfig = getOAuthProviderConfig('pingone_ai_core');
   
-  console.log('  P1AIC Configuration:');
+  console.log('  PingOne Core Configuration:');
   
   // Test admin client config
   console.log('    Admin Client:');

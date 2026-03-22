@@ -125,4 +125,26 @@ export class BankingAuthenticationManager {
   destroy(): void {
     this.authRequestGenerator.destroy();
   }
+
+  // ---------------------------------------------------------------------------
+  // CIBA helpers (Client-Initiated Backchannel Authentication)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the PingOne bc-authorize endpoint derived from authorizationEndpoint.
+   * e.g. https://auth.pingone.com/{envId}/as/bc-authorize
+   */
+  getCIBAEndpoint(): string {
+    return this.config.authorizationEndpoint.replace('/authorize', '/bc-authorize');
+  }
+
+  /** Base-64 encoded client_id:client_secret for Basic auth. */
+  getClientCredentials(): string {
+    return Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
+  }
+
+  /** Token endpoint — used for CIBA poll requests. */
+  getTokenEndpoint(): string {
+    return this.config.tokenEndpoint;
+  }
 }

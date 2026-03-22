@@ -26,6 +26,8 @@ export interface ConnectionInfo {
   ws: WebSocket;
   sessionId?: string;
   agentToken?: string;
+  /** Email of the authenticated user, injected via session_init message from the frontend. */
+  userEmail?: string;
   connectedAt: Date;
   lastActivity: Date;
   messageCount: number;
@@ -249,6 +251,22 @@ export class BankingMCPServer extends EventEmitter {
         return;
       }
 
+      // Handle frontend session_init (non-MCP) — captures userEmail for CIBA.
+      // This is injected by App.js before the MCP handshake.
+      if ((message as any).type === 'session_init') {
+        const email = (message as any).userEmail as string | undefined;
+        if (email && typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          connection.userEmail = email;
+          // Also persist to session if one already exists
+          if (connection.sessionId) {
+            this.sessionManager.setSessionEmail(connection.sessionId, email);
+          }
+          console.log(`[BankingMCPServer] session_init: stored email for connection ${connectionId}`);
+        }
+        // No response expected for session_init
+        return;
+      }
+
       // Validate message structure
       if (!this.isValidMCPMessage(message)) {
         const messageId = (message as any)?.id ?? 'unknown';
@@ -443,7 +461,13 @@ export class BankingMCPServer extends EventEmitter {
     const context: MessageHandlerContext = {
       connectionId,
       agentToken: connection.agentToken,
-      session: connection.sessionId ? (await this.sessionManager.getSession(connection.sessionId)) || undefined : undefined
+      session: connection.sessionId ? (await this.sessionManager.getSession(connection.sessionId)) || undefined : undefined,
+      userEmail: connection.userEmail,
+      sendNotification: (notification: object) => {
+        if (connection.ws.readyState === WebSocket.OPEN) {
+          connection.ws.send(JSON.stringify(notification));
+        }
+      },
     };
 
     // Route to message handler
@@ -453,6 +477,10 @@ export class BankingMCPServer extends EventEmitter {
     if (context.session && !connection.sessionId) {
       connection.sessionId = context.session.sessionId;
       connection.agentToken = context.agentToken;
+      // Persist deferred email if we just created the session
+      if (connection.userEmail) {
+        this.sessionManager.setSessionEmail(context.session.sessionId, connection.userEmail);
+      }
     }
 
     return response;

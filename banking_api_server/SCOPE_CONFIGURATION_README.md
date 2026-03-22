@@ -21,7 +21,7 @@ cp .env.production .env
 
 ### 2. Configure OAuth Provider
 
-Use the generated script from the test output to configure your OAuth provider (P1AIC) to issue tokens with appropriate scopes.
+Use the generated script from the test output to configure your OAuth provider (PingOne Core) to issue tokens with appropriate scopes.
 
 ### 3. Test Configuration
 
@@ -136,9 +136,9 @@ Create these test users in your OAuth provider:
 
 ## OAuth Provider Configuration
 
-### P1AIC Setup
+### PingOne Core Setup
 
-Add this script to your P1AIC token customization:
+Add this script to your PingOne Core token customization:
 
 ```javascript
 function customizeToken(token, user, client) {

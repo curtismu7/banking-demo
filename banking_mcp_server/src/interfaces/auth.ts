@@ -9,6 +9,9 @@ export interface AgentTokenInfo {
   scopes: string[];
   expiresAt: Date;
   isValid: boolean;
+  /** Populated when the token carries an RFC 8693 `act` claim — identifies the
+   *  actor (e.g. BFF or AI agent client_id) that performed token exchange. */
+  actorClientId?: string;
 }
 
 export interface UserTokens {
@@ -31,6 +34,9 @@ export interface TokenInfo {
   sub?: string;
   aud?: string;
   iss?: string;
+  /** RFC 8693 §4.1 — present on delegated tokens issued via token exchange.
+   *  Identifies the actor (client) that performed the exchange on behalf of `sub`. */
+  act?: { client_id?: string; sub?: string; iss?: string };
 }
 
 export interface PingOneConfig {

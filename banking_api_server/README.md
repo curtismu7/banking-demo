@@ -1,12 +1,12 @@
-# Banking API with P1AIC OAuth Integration
+# Banking API with PingOne Core OAuth Integration
 
-A comprehensive banking API server with administrative UI and PingOne Advanced Identity Cloud (P1AIC) OAuth2 integration for secure admin authentication.
+A comprehensive banking API server with administrative UI and PingOne Advanced Identity Cloud (PingOne Core) OAuth2 integration for secure admin authentication.
 
 ## Features
 
 - **RESTful Banking APIs**: CRUD operations for users, accounts, and transactions
 - **Admin Dashboard**: Comprehensive administrative interface with activity logging
-- **P1AIC OAuth Integration**: Enterprise-grade authentication using authorization code flow
+- **PingOne Core OAuth Integration**: Enterprise-grade authentication using authorization code flow
 - **Activity Logging**: Detailed request/response logging with filtering and export
 - **Persistent Data**: File-based data persistence across server restarts
 - **Security**: JWT authentication, rate limiting, CORS, and Helmet security headers
@@ -16,8 +16,8 @@ A comprehensive banking API server with administrative UI and PingOne Advanced I
 ### Prerequisites
 
 - Node.js (v14 or higher)
-- P1AIC tenant with admin access
-- OAuth2 client configured in P1AIC
+- PingOne Core tenant with admin access
+- OAuth2 client configured in PingOne Core
 
 ### Installation
 
@@ -38,9 +38,9 @@ A comprehensive banking API server with administrative UI and PingOne Advanced I
    ./setup-env.sh
    ```
 
-4. **Configure P1AIC OAuth client:**
-   - Follow the detailed instructions in `P1AIC_SETUP.md`
-   - Update the `.env` file with your P1AIC configuration
+4. **Configure PingOne Core OAuth client:**
+   - Follow the detailed instructions in `PINGONE_CORE_SETUP.md`
+   - Update the `.env` file with your PingOne Core configuration
 
 5. **Start the application:**
    ```bash
@@ -58,7 +58,7 @@ A comprehensive banking API server with administrative UI and PingOne Advanced I
 - Password: `admin123`
 - Suitable for development and testing
 
-### P1AIC OAuth (Production)
+### PingOne Core OAuth (Production)
 - Enterprise-grade authentication
 - Single Sign-On (SSO) support
 - Multi-Factor Authentication (MFA)
@@ -93,11 +93,11 @@ A comprehensive banking API server with administrative UI and PingOne Advanced I
 Copy `env.example` to `.env` and configure:
 
 ```env
-# P1AIC Configuration
-P1AIC_TENANT_NAME=your-tenant-name
-P1AIC_CLIENT_ID=your-client-id
-P1AIC_CLIENT_SECRET=your-client-secret
-P1AIC_REDIRECT_URI=http://localhost:3001/api/auth/oauth/callback
+# PingOne Core Configuration
+PINGONE_CORE_TENANT_NAME=your-tenant-name
+PINGONE_CORE_CLIENT_ID=your-client-id
+PINGONE_CORE_CLIENT_SECRET=your-client-secret
+PINGONE_CORE_REDIRECT_URI=http://localhost:3001/api/auth/oauth/callback
 
 # Security
 SESSION_SECRET=your-session-secret
@@ -108,9 +108,9 @@ PORT=3001
 NODE_ENV=development
 ```
 
-### P1AIC Setup
+### PingOne Core Setup
 
-1. Create OAuth2 client in P1AIC admin console
+1. Create OAuth2 client in PingOne Core admin console
 2. Configure redirect URI: `http://localhost:3001/api/auth/oauth/callback`
 3. Set grant types to "Authorization Code"
 4. Configure user roles and attributes
@@ -153,13 +153,13 @@ NODE_ENV=development
 ### Common Issues
 
 1. **"Invalid redirect URI"**
-   - Ensure redirect URI matches P1AIC configuration exactly
+   - Ensure redirect URI matches PingOne Core configuration exactly
 
 2. **"Invalid client"**
    - Verify client ID and secret in `.env` file
 
 3. **"Insufficient permissions"**
-   - Check user role assignment in P1AIC
+   - Check user role assignment in PingOne Core
 
 4. **Session issues**
    - Verify session secret is properly set
@@ -173,7 +173,7 @@ DEBUG_OAUTH=true
 
 ## Documentation
 
-- `P1AIC_SETUP.md` - Detailed P1AIC configuration guide
+- `PINGONE_CORE_SETUP.md` - Detailed PingOne Core configuration guide
 - `env.example` - Environment configuration template
 - `setup-env.sh` - Automated environment setup
 

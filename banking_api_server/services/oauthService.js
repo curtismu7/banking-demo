@@ -91,12 +91,12 @@ class OAuthService {
   /**
    * Generate authorization URL for the authorization code flow with PKCE (S256)
    */
-  generateAuthorizationUrl(state, codeVerifier) {
+  generateAuthorizationUrl(state, codeVerifier, redirectUri) {
     const codeChallenge = this.generateCodeChallenge(codeVerifier);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.clientId,
-      redirect_uri: this.config.redirectUri,
+      redirect_uri: redirectUri || this.config.redirectUri,
       scope: this.config.scopes.join(' '),
       state: state,
       code_challenge: codeChallenge,
@@ -110,12 +110,12 @@ class OAuthService {
    * Exchange authorization code for access token.
    * codeVerifier must match the code_challenge sent during /authorize (PKCE S256).
    */
-  async exchangeCodeForToken(code, codeVerifier) {
+  async exchangeCodeForToken(code, codeVerifier, redirectUri) {
     try {
       const body = {
         grant_type: 'authorization_code',
         code: code,
-        redirect_uri: this.config.redirectUri,
+        redirect_uri: redirectUri || this.config.redirectUri,
         client_id: this.config.clientId,
       };
       // Include client_secret only if present (not required when using PKCE with public clients)
@@ -145,7 +145,46 @@ class OAuthService {
   }
 
   /**
-   * Get user information from P1AIC
+   * RFC 8693 Token Exchange — exchange a subject token for a narrowly-scoped
+   * delegated token targeted at a specific audience (e.g. the MCP server).
+   *
+   * The resulting token will contain an `act` claim identifying this client
+   * as the actor, and its scope/audience will be restricted to what was requested.
+   *
+   * PingOne must be configured to:
+   *   1. Issue `may_act` on user tokens (naming this client_id as permitted actor)
+   *   2. Allow the token-exchange grant type on this client
+   */
+  async performTokenExchange(subjectToken, audience, scopes) {
+    const scopeStr = Array.isArray(scopes) ? scopes.join(' ') : scopes;
+    const body = new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      subject_token: subjectToken,
+      subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      requested_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      audience: audience,
+      scope: scopeStr,
+      client_id: this.config.clientId,
+    });
+    if (this.config.clientSecret) {
+      body.set('client_secret', this.config.clientSecret);
+    }
+    try {
+      const response = await axios.post(this.config.tokenEndpoint, body.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      const exchanged = response.data.access_token;
+      if (!exchanged) throw new Error('Token exchange response missing access_token');
+      console.log(`[TokenExchange] Issued delegated token for audience=${audience} scope="${scopeStr}"`);
+      return exchanged;
+    } catch (error) {
+      console.error('[TokenExchange] Failed:', error.response?.data || error.message);
+      throw new Error(`Token exchange failed: ${error.response?.data?.error_description || error.message}`);
+    }
+  }
+
+  /**
+   * Get user information from PingOne Core
    */
   async getUserInfo(accessToken) {
     try {
@@ -199,7 +238,7 @@ class OAuthService {
   }
 
   /**
-   * Create a user object from P1AIC user info
+   * Create a user object from PingOne Core user info
    */
   createUserFromOAuth(userInfo) {
     return {
@@ -211,7 +250,7 @@ class OAuthService {
       role: 'customer', // Default role, will be overridden in OAuth callback if needed
       isActive: true,
       createdAt: new Date(),
-      oauthProvider: 'p1AIC',
+      oauthProvider: 'pingone_ai_core',
       oauthId: userInfo.sub || userInfo.id
     };
   }

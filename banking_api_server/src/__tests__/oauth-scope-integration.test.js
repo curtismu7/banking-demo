@@ -635,7 +635,7 @@ describe('OAuth Scope-based Authorization Integration Tests', () => {
       const statusResponse = {
         authenticated: true,
         user: sessionData.user,
-        oauthProvider: 'p1aic',
+        oauthProvider: 'pingone_ai_core',
         accessToken: sessionData.oauthTokens.accessToken,
         tokenType: sessionData.oauthTokens.tokenType,
         expiresAt: sessionData.oauthTokens.expiresAt,

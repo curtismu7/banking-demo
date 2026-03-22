@@ -1,18 +1,18 @@
-# P1AIC OAuth Integration Setup Guide
+# PingOne Core OAuth Integration Setup Guide
 
-This guide explains how to configure PingOne Advanced Identity Cloud (P1AIC) OAuth2 authorization code flow for admin user authentication.
+This guide explains how to configure PingOne Advanced Identity Cloud (PingOne Core) OAuth2 authorization code flow for admin user authentication.
 
 ## Prerequisites
 
-1. A P1AIC tenant with admin access
+1. A PingOne Core tenant with admin access
 2. Node.js application running on port 3001
 3. Valid domain/URL for redirect URI
 
-## P1AIC Configuration
+## PingOne Core Configuration
 
-### 1. Create OAuth2 Client in P1AIC
+### 1. Create OAuth2 Client in PingOne Core
 
-1. Log into your P1AIC admin console
+1. Log into your PingOne Core admin console
 2. Navigate to **Applications** > **OAuth2/OpenID Connect** > **Clients**
 3. Click **Create Client**
 4. Configure the client with these settings:
@@ -65,18 +65,18 @@ This script will:
    cp env.example .env
    ```
 
-2. **Edit the `.env` file** and replace the placeholder values with your actual P1AIC configuration:
+2. **Edit the `.env` file** and replace the placeholder values with your actual PingOne Core configuration:
 
    ```env
-   # P1AIC Tenant Configuration
-   P1AIC_TENANT_NAME=your-tenant-name
+   # PingOne Core Tenant Configuration
+   PINGONE_CORE_TENANT_NAME=your-tenant-name
 
    # OAuth2 Client Configuration
-   P1AIC_CLIENT_ID=your-client-id
-   P1AIC_CLIENT_SECRET=your-client-secret
+   PINGONE_CORE_CLIENT_ID=your-client-id
+   PINGONE_CORE_CLIENT_SECRET=your-client-secret
 
-   # Redirect URI (must match what's configured in P1AIC)
-   P1AIC_REDIRECT_URI=http://localhost:3001/api/auth/oauth/callback
+   # Redirect URI (must match what's configured in PingOne Core)
+   PINGONE_CORE_REDIRECT_URI=http://localhost:3001/api/auth/oauth/callback
 
    # Session Configuration
    SESSION_SECRET=your-session-secret-key-change-this-in-production
@@ -117,25 +117,25 @@ npm start
 
 ### Authorization Code Flow
 
-1. **User clicks "Sign in with P1AIC"**
+1. **User clicks "Sign in with PingOne Core"**
    - Application generates authorization URL with state parameter
-   - User is redirected to P1AIC authorization endpoint
+   - User is redirected to PingOne Core authorization endpoint
 
-2. **User authenticates with P1AIC**
+2. **User authenticates with PingOne Core**
    - User enters credentials (may include MFA)
-   - P1AIC validates user and checks permissions
+   - PingOne Core validates user and checks permissions
 
-3. **P1AIC redirects back with authorization code**
-   - P1AIC redirects to callback URL with code and state
+3. **PingOne Core redirects back with authorization code**
+   - PingOne Core redirects to callback URL with code and state
    - Application validates state parameter
 
 4. **Application exchanges code for tokens**
-   - Application sends code to P1AIC token endpoint
-   - P1AIC returns access token and refresh token
+   - Application sends code to PingOne Core token endpoint
+   - PingOne Core returns access token and refresh token
 
 5. **Application gets user information**
    - Application uses access token to call userinfo endpoint
-   - P1AIC returns user profile and role information
+   - PingOne Core returns user profile and role information
 
 6. **User is logged in**
    - Application creates/updates user in local database
@@ -154,7 +154,7 @@ npm start
 ### Common Issues
 
 1. **"Invalid redirect URI"**
-   - Ensure the redirect URI in your `.env` file exactly matches what's configured in P1AIC
+   - Ensure the redirect URI in your `.env` file exactly matches what's configured in PingOne Core
    - Check for trailing slashes or protocol mismatches
 
 2. **"Invalid client"**
@@ -162,7 +162,7 @@ npm start
    - Ensure the client is configured for authorization code flow
 
 3. **"Insufficient permissions"**
-   - Check that the user has the admin role assigned in P1AIC
+   - Check that the user has the admin role assigned in PingOne Core
    - Verify the role attribute mapping in user profile
 
 4. **"Invalid state parameter"**
@@ -202,7 +202,7 @@ For production deployment:
 ## Testing
 
 1. **Test with regular login** first to ensure basic functionality
-2. **Test OAuth flow** with a test user in P1AIC
+2. **Test OAuth flow** with a test user in PingOne Core
 3. **Test role-based access** with users having different roles
 4. **Test logout** and session clearing
 5. **Test error scenarios** (invalid tokens, expired sessions, etc.)

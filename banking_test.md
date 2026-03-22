@@ -214,7 +214,7 @@ The MCP WebSocket server must be hosted separately (Vercel doesn't support persi
    vercel env add REDIS_URL
    vercel env add SESSION_SECRET
    vercel env add PINGONE_ENVIRONMENT_ID
-   vercel env add P1AIC_CLIENT_ID
+   vercel env add PINGONE_AI_CORE_CLIENT_ID
    # ... (all vars listed in .env.vercel.example)
    ```
 

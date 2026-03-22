@@ -154,7 +154,7 @@ function testSpecificScopeRequirements(userType, tokenScopes) {
 function testOAuthProviderClientConfigs() {
   console.log('\n🔐 Testing OAuth Provider Client Configurations...');
   
-  const providerConfig = getOAuthProviderConfig('p1aic');
+  const providerConfig = getOAuthProviderConfig('pingone_ai_core');
   
   // Test admin client
   console.log('\n  Admin Client Configuration:');
@@ -229,7 +229,7 @@ function generateOAuthProviderScript() {
   console.log('='.repeat(60));
   
   console.log(`
-// P1AIC Scope Assignment Script
+// PingOne Core Scope Assignment Script
 // Add this to your OAuth provider's token customization
 
 function customizeToken(token, user, client) {

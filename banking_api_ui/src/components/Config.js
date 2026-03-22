@@ -36,7 +36,7 @@ const EMPTY_FORM = {
 };
 
 // ─── Helper: secret field wrapper ────────────────────────────────────────────
-function SecretField({ label, fieldKey, value, isSet, showValue, onToggleShow, onChange, help }) {
+function SecretField({ label, fieldKey, value, isSet, showValue, onToggleShow, onChange, help, disabled }) {
   return (
     <div className="form-group">
       <label className="form-label">
@@ -62,17 +62,20 @@ function SecretField({ label, fieldKey, value, isSet, showValue, onToggleShow, o
           placeholder={isSet ? 'Leave blank to keep current value' : 'Enter value…'}
           autoComplete="off"
           style={{ flex: 1 }}
+          disabled={disabled}
+          readOnly={disabled}
         />
         <button
           type="button"
           onClick={() => onToggleShow(fieldKey)}
           title={showValue ? 'Hide' : 'Show'}
+          disabled={disabled}
           style={{
             padding: '0.5rem 0.75rem',
             border: '1px solid #d1d5db',
             borderRadius: '0.375rem',
             background: 'white',
-            cursor: 'pointer',
+            cursor: disabled ? 'default' : 'pointer',
             fontSize: '1rem',
             lineHeight: 1,
           }}
@@ -86,7 +89,7 @@ function SecretField({ label, fieldKey, value, isSet, showValue, onToggleShow, o
 }
 
 // ─── Helper: public text field ────────────────────────────────────────────────
-function TextField({ label, fieldKey, value, onChange, help, placeholder, type = 'text' }) {
+function TextField({ label, fieldKey, value, onChange, help, placeholder, type = 'text', disabled }) {
   return (
     <div className="form-group">
       <label className="form-label">{label}</label>
@@ -96,6 +99,8 @@ function TextField({ label, fieldKey, value, onChange, help, placeholder, type =
         value={value}
         onChange={(e) => onChange(fieldKey, e.target.value)}
         placeholder={placeholder || ''}
+        disabled={disabled}
+        readOnly={disabled}
       />
       {help && <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>{help}</p>}
     </div>
@@ -109,6 +114,7 @@ export default function Config() {
   const [showSecret, setShowSecret]   = useState({});   // { key: bool }
   const [storageType, setStorageType] = useState('');
   const [isConfigured, setIsConfigured] = useState(false);
+  const [readOnly, setReadOnly]       = useState(false);
 
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
@@ -151,6 +157,7 @@ export default function Config() {
       setSecretMeta(meta);
       setStorageType(data.storageType || '');
       setIsConfigured(data.isConfigured || false);
+      setReadOnly(data.readOnly || false);
 
       // Persist public values back to IndexedDB
       await savePublicConfig(formUpdates);
@@ -292,8 +299,23 @@ export default function Config() {
 
       <div className="container" style={{ padding: '2rem 20px', maxWidth: '800px' }}>
 
+        {/* Read-only banner (Vercel deployment) */}
+        {readOnly && (
+          <div style={{
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '0.5rem',
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            color: '#1e40af',
+          }}>
+            <strong>🔒 Read-only mode:</strong> Configuration is managed by environment variables in this deployment.
+            Contact your administrator to change these settings.
+          </div>
+        )}
+
         {/* First-run banner */}
-        {!isConfigured && (
+        {!isConfigured && !readOnly && (
           <div style={{
             background: '#fff7ed',
             border: '1px solid #fed7aa',
@@ -323,6 +345,7 @@ export default function Config() {
                   onChange={handleChange}
                   placeholder="e.g. a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                   help="Found in PingOne → Environments → (your env) → Settings → Environment ID"
+                  disabled={readOnly}
                 />
               </div>
               <div>
@@ -331,6 +354,7 @@ export default function Config() {
                   className="form-input"
                   value={form.pingone_region}
                   onChange={(e) => handleChange('pingone_region', e.target.value)}
+                  disabled={readOnly}
                 >
                   {REGION_OPTIONS.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
@@ -345,6 +369,7 @@ export default function Config() {
                   onChange={handleChange}
                   placeholder={window.location.origin}
                   help="The URL your React app is served from"
+                  disabled={readOnly}
                 />
               </div>
             </div>
@@ -392,6 +417,7 @@ export default function Config() {
                 value={form.admin_client_id}
                 onChange={handleChange}
                 placeholder="Admin app client ID"
+                disabled={readOnly}
               />
               <div /> {/* spacer */}
               <div style={{ gridColumn: '1 / -1' }}>
@@ -404,6 +430,7 @@ export default function Config() {
                   onToggleShow={toggleShow}
                   onChange={handleChange}
                   help="Leave blank to keep the existing secret stored on the server"
+                  disabled={readOnly}
                 />
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
@@ -413,6 +440,7 @@ export default function Config() {
                   value={form.admin_redirect_uri}
                   onChange={handleChange}
                   placeholder={`${window.location.origin}/api/auth/oauth/callback`}
+                  disabled={readOnly}
                 />
               </div>
             </div>
@@ -431,6 +459,7 @@ export default function Config() {
                 value={form.user_client_id}
                 onChange={handleChange}
                 placeholder="End-user app client ID"
+                disabled={readOnly}
               />
               <div />
               <div style={{ gridColumn: '1 / -1' }}>
@@ -443,6 +472,7 @@ export default function Config() {
                   onToggleShow={toggleShow}
                   onChange={handleChange}
                   help="Leave blank to keep the existing secret stored on the server"
+                  disabled={readOnly}
                 />
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
@@ -452,6 +482,7 @@ export default function Config() {
                   value={form.user_redirect_uri}
                   onChange={handleChange}
                   placeholder={`${window.location.origin}/api/auth/oauth/user/callback`}
+                  disabled={readOnly}
                 />
               </div>
             </div>
@@ -469,6 +500,7 @@ export default function Config() {
                 value={form.admin_role}
                 onChange={handleChange}
                 placeholder="admin"
+                disabled={readOnly}
               />
               <TextField
                 label="Customer Role name (in PingOne)"
@@ -476,6 +508,7 @@ export default function Config() {
                 value={form.user_role}
                 onChange={handleChange}
                 placeholder="customer"
+                disabled={readOnly}
               />
               <div style={{ gridColumn: '1 / -1' }}>
                 <SecretField
@@ -487,6 +520,7 @@ export default function Config() {
                   onToggleShow={toggleShow}
                   onChange={handleChange}
                   help="Random string used to sign session cookies — use at least 32 characters"
+                  disabled={readOnly}
                 />
               </div>
             </div>
@@ -508,6 +542,7 @@ export default function Config() {
                   className="form-input"
                   value={form.authorize_enabled}
                   onChange={(e) => handleChange('authorize_enabled', e.target.value)}
+                  disabled={readOnly}
                 >
                   <option value="false">Disabled</option>
                   <option value="true">Enabled — enforce on transfers &amp; withdrawals</option>
@@ -523,6 +558,7 @@ export default function Config() {
                 onChange={handleChange}
                 placeholder="e.g. abc12345-…"
                 help="The PDP ID from PingOne Authorize → Policy Decision Points."
+                disabled={readOnly}
               />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
@@ -533,6 +569,7 @@ export default function Config() {
                 onChange={handleChange}
                 placeholder="Worker app client ID"
                 help="Client ID of the Worker application used to obtain tokens for policy evaluation."
+                disabled={readOnly}
               />
               <SecretField
                 label="Worker App Client Secret"
@@ -543,6 +580,7 @@ export default function Config() {
                 onToggleShow={toggleShow}
                 onChange={handleChange}
                 help="Client secret for the Worker app. Stored encrypted at rest."
+                disabled={readOnly}
               />
             </div>
           </div>
@@ -587,6 +625,7 @@ export default function Config() {
                 help={storageType === 'vercel-kv'
                   ? '⚠️ This URL is only reachable when running locally. On Vercel, clear this field.'
                   : 'URL of the banking LangChain agent (WebSocket). Local only — not available on Vercel.'}
+                disabled={readOnly}
               />
               <div>
                 <label className="form-label">Debug OAuth logging</label>
@@ -594,6 +633,7 @@ export default function Config() {
                   className="form-input"
                   value={form.debug_oauth}
                   onChange={(e) => handleChange('debug_oauth', e.target.value)}
+                  disabled={readOnly}
                 >
                   <option value="false">Off</option>
                   <option value="true">On (verbose)</option>
@@ -601,8 +641,8 @@ export default function Config() {
               </div>
             </div>
 
-            {/* Vercel: admin password required to save once config is set */}
-            {storageType === 'vercel-kv' && (
+            {/* Vercel: admin password required to save once config is set — hidden in read-only mode */}
+            {storageType === 'vercel-kv' && !readOnly && (
               <div style={{ marginTop: '1rem', borderTop: '1px solid #e5e7eb', paddingTop: '1rem' }}>
                 <div style={{
                   background: '#faf5ff',
@@ -634,7 +674,8 @@ export default function Config() {
             )}
           </div>
 
-          {/* ── Save button ── */}
+          {/* ── Save button — hidden in read-only mode ── */}
+          {!readOnly && (
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '0.5rem', marginBottom: '2rem' }}>
             <button type="button" className="btn btn-secondary" onClick={loadConfig}>
               ↺ Reload from server
@@ -643,6 +684,7 @@ export default function Config() {
               {saving ? 'Saving…' : '💾 Save Configuration'}
             </button>
           </div>
+          )}
 
         </form>
       </div>

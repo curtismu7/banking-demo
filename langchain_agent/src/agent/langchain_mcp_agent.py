@@ -3,7 +3,7 @@ LangChain MCP Agent implementation.
 """
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 from langchain.agents import AgentExecutor, create_openai_functions_agent
@@ -24,6 +24,7 @@ from .mcp_tool_provider import MCPToolProvider
 from .conversation_memory import ConversationMemory
 from .execution_tracer import AgentExecutionTracer, TracingMixin
 from .tracing_callback import DetailedTracingCallbackHandler
+from .websocket_stream_callback import WebSocketStreamCallbackHandler
 
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,10 @@ class LangChainMCPAgent(TracingMixin):
                 model_name=self.config.langchain.model_name,
                 temperature=self.config.langchain.temperature,
                 max_tokens=self.config.langchain.max_tokens,
-                openai_api_key=self.config.langchain.openai_api_key
+                openai_api_key=self.config.langchain.openai_api_key,
+                streaming=bool(
+                    getattr(self.config.langchain, "stream_llm_tokens", True)
+                ),
             )
             logger.info(f"Initialized ChatOpenAI with model {self.config.langchain.model_name}")
             return llm
@@ -247,6 +251,41 @@ Remember to maintain conversation context and provide helpful, accurate response
         )
         
         return agent_executor
+
+    def _maybe_attach_websocket_streaming(
+        self,
+        agent_executor: AgentExecutor,
+        session_id: str,
+        stream_context: Optional[Dict[str, Any]],
+    ) -> None:
+        """
+        Attach WebSocket stream callback when stream_context provides websocket_handler.
+        Emits MCP tool_start/tool_end and optional LLM token deltas during ainvoke.
+        """
+        if not stream_context:
+            return
+        handler = stream_context.get("websocket_handler")
+        if handler is None:
+            return
+        stream_tools = getattr(self.config.langchain, "stream_mcp_tool_events", True)
+        stream_tokens = getattr(self.config.langchain, "stream_llm_tokens", True)
+        if not stream_tools and not stream_tokens:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("No running event loop; WebSocket streaming disabled for this turn")
+            return
+        stream_cb = WebSocketStreamCallbackHandler(
+            session_id=session_id,
+            loop=loop,
+            websocket_handler=handler,
+            stream_mcp_tool_events=stream_tools,
+            stream_llm_tokens=stream_tokens,
+        )
+        if getattr(agent_executor, "callbacks", None) is None:
+            agent_executor.callbacks = []
+        agent_executor.callbacks.append(stream_cb)
     
     def _create_basic_agent(self):
         """Create a basic agent without MCP tools for general conversation."""
@@ -723,13 +762,19 @@ Your account registration is now complete! You can now use all banking services.
         # If we get here, registration flow didn't handle the message
         return None
 
-    async def process_message_with_tracing(self, user_message: str, session_id: str) -> str:
+    async def process_message_with_tracing(
+        self,
+        user_message: str,
+        session_id: str,
+        stream_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         Process a user message with real-time execution tracing and visualization.
         
         Args:
             user_message: The user's input message
             session_id: The chat session ID
+            stream_context: Optional dict with websocket_handler for stream_event (tool + LLM token) streaming
             
         Returns:
             str: The agent's response
@@ -941,6 +986,8 @@ What's your email address?"""
                     if agent_executor.agent.callbacks is None:
                         agent_executor.agent.callbacks = []
                     agent_executor.agent.callbacks.append(detailed_callback)
+
+            self._maybe_attach_websocket_streaming(agent_executor, session_id, stream_context)
             
             # Execute agent
             prompt_text = f"User: {user_message}\nContext: {len(chat_history)} previous messages"

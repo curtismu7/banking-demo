@@ -24,6 +24,9 @@ const config = {
   get clientSecret()           { return configStore.getEffective('admin_client_secret'); },
   get redirectUri()            { return configStore.getEffective('admin_redirect_uri'); },
 
+  // CIBA — Client-Initiated Backchannel Authentication
+  get cibaEndpoint()           { return `${this._base}/bc-authorize`; },
+
   // Scopes — standard OIDC only
   scopes: ['openid', 'profile', 'email'],
 

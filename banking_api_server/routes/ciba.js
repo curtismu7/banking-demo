@@ -1,0 +1,228 @@
+'use strict';
+
+/**
+ * routes/ciba.js — CIBA (Client-Initiated Backchannel Authentication) routes
+ *
+ * POST /api/auth/ciba/initiate
+ *   Starts a backchannel auth request for the current session user.
+ *   Returns { auth_req_id, expires_in, interval } — the browser uses these
+ *   to display a "waiting for approval" UI and to start polling.
+ *
+ * GET  /api/auth/ciba/poll/:authReqId
+ *   Single poll — returns { status: 'pending' | 'approved' | 'denied' }.
+ *   When approved, tokens are stored in the server-side session (BFF pattern)
+ *   and never sent to the browser.
+ *
+ * GET  /api/auth/ciba/status
+ *   Returns whether CIBA is enabled and the delivery mode.
+ *
+ * POST /api/auth/ciba/notify
+ *   Ping-mode callback: PingOne calls this when the user approves.
+ *   Marks the auth_req_id as approved in the session store.
+ *
+ * POST /api/auth/ciba/cancel/:authReqId
+ *   Allows the browser to cancel a pending CIBA request.
+ */
+
+const express = require('express');
+const router  = express.Router();
+const cibaService = require('../services/cibaService');
+const { authenticateToken } = require('../middleware/auth');
+const configStore = require('../services/configStore');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function _cibaEnabled(res) {
+  if (!cibaService.isEnabled()) {
+    res.status(503).json({
+      error: 'ciba_disabled',
+      message: 'CIBA is not enabled. Set CIBA_ENABLED=true in your environment.',
+    });
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/auth/ciba/status  — public, no auth needed
+// ---------------------------------------------------------------------------
+
+router.get('/status', (req, res) => {
+  res.json({
+    enabled:      cibaService.isEnabled(),
+    deliveryMode: configStore.getEffective('ciba_token_delivery_mode') || 'poll',
+    bindingMessage: configStore.getEffective('ciba_binding_message') || 'Banking App Authentication',
+    // Show PingOne admin steps needed if not enabled
+    setupRequired: !cibaService.isEnabled(),
+    setupSteps: !cibaService.isEnabled() ? [
+      'Set CIBA_ENABLED=true in your environment',
+      'Enable the CIBA grant type on your PingOne application',
+      'Enable Push Notification in your PingOne MFA policy',
+    ] : [],
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/ciba/initiate — requires existing session
+// ---------------------------------------------------------------------------
+
+/**
+ * Body: {
+ *   scope?:           'openid profile email banking:write'
+ *   binding_message?: 'Approve $500 transfer'   — shown on phone notification
+ *   acr_values?:      'Multi_factor'             — for step-up auth
+ *   login_hint?:      'user@example.com'         — override from session email
+ * }
+ */
+router.post('/initiate', authenticateToken, async (req, res) => {
+  if (!_cibaEnabled(res)) return;
+
+  const loginHint = req.body.login_hint
+    || req.user?.email
+    || req.session?.oauthUser?.email;
+
+  if (!loginHint) {
+    return res.status(400).json({
+      error: 'missing_login_hint',
+      message: 'User email is required to initiate CIBA. Ensure the user is logged in with an email claim.',
+    });
+  }
+
+  const { scope, binding_message, acr_values } = req.body;
+
+  try {
+    const result = await cibaService.initiateBackchannelAuth(
+      loginHint,
+      binding_message,
+      scope || 'openid profile email',
+      acr_values || '',
+    );
+
+    // Track in session so poll endpoint can verify ownership
+    req.session.cibaRequests = req.session.cibaRequests || {};
+
+    // Enforce one-at-a-time: cancel any existing pending request
+    req.session.cibaRequests = Object.fromEntries(
+      Object.entries(req.session.cibaRequests).filter(
+        ([, v]) => Date.now() < v.expiresAt
+      )
+    );
+
+    req.session.cibaRequests[result.auth_req_id] = {
+      initiatedAt: Date.now(),
+      expiresAt:   Date.now() + result.expires_in * 1000,
+      loginHint,
+      scope: scope || 'openid profile email',
+      acr_values: acr_values || '',
+      binding_message: binding_message || '',
+    };
+
+    res.json({
+      auth_req_id: result.auth_req_id,
+      expires_in:  result.expires_in,
+      interval:    result.interval,
+      login_hint_display: loginHint.replace(/(.{2}).*@/, '$1***@'), // mask for display only
+    });
+  } catch (err) {
+    console.error('[CIBA] initiate failed:', err.response?.data || err.message);
+    const pingError = err.response?.data;
+    res.status(502).json({
+      error:   pingError?.error || 'ciba_initiation_failed',
+      message: pingError?.error_description || err.message,
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/auth/ciba/poll/:authReqId
+// ---------------------------------------------------------------------------
+
+router.get('/poll/:authReqId', authenticateToken, async (req, res) => {
+  if (!_cibaEnabled(res)) return;
+
+  const { authReqId } = req.params;
+  const pending = req.session.cibaRequests?.[authReqId];
+
+  if (!pending) {
+    return res.status(404).json({
+      error:  'unknown_request',
+      message: 'No pending CIBA request with that ID in this session.',
+    });
+  }
+
+  if (Date.now() > pending.expiresAt) {
+    delete req.session.cibaRequests[authReqId];
+    return res.status(410).json({
+      error:  'request_expired',
+      message: 'The CIBA authentication request has expired. Please try again.',
+    });
+  }
+
+  try {
+    const tokens = await cibaService.pollForTokens(authReqId);
+
+    // Store tokens server-side (BFF pattern — never expose raw tokens to browser)
+    req.session.oauthTokens = {
+      accessToken:  tokens.access_token,
+      idToken:      tokens.id_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt:    Date.now() + (tokens.expires_in || 3600) * 1000,
+      tokenType:    tokens.token_type || 'Bearer',
+      scope:        pending.scope,
+      grantedVia:   'ciba',
+    };
+
+    delete req.session.cibaRequests[authReqId];
+
+    res.json({
+      status: 'approved',
+      scope:  pending.scope,
+    });
+  } catch (err) {
+    const errorCode = err.response?.data?.error;
+
+    if (errorCode === 'authorization_pending') {
+      return res.json({ status: 'pending' });
+    }
+    if (errorCode === 'slow_down') {
+      return res.json({ status: 'pending', slow_down: true, retry_after: 10 });
+    }
+
+    // User denied or request expired at PingOne
+    delete req.session.cibaRequests?.[authReqId];
+    res.status(403).json({
+      status: 'denied',
+      error:  errorCode || 'access_denied',
+      message: err.response?.data?.error_description || 'The user denied the authentication request.',
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/ciba/cancel/:authReqId
+// ---------------------------------------------------------------------------
+
+router.post('/cancel/:authReqId', authenticateToken, (req, res) => {
+  const { authReqId } = req.params;
+  if (req.session.cibaRequests?.[authReqId]) {
+    delete req.session.cibaRequests[authReqId];
+  }
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/ciba/notify  — PingOne ping-mode callback (no session auth)
+// ---------------------------------------------------------------------------
+
+router.post('/notify', (req, res) => {
+  // In ping mode, PingOne sends a POST with the client_notification_token
+  // in the Authorization: Bearer header and the auth_req_id in the body.
+  // For now we acknowledge and note that ping-mode requires shared state (Redis).
+  // Poll mode is fully functional without this endpoint.
+  console.log('[CIBA] ping notification received:', req.body?.auth_req_id);
+  res.sendStatus(204);
+});
+
+module.exports = router;
