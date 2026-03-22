@@ -28,6 +28,8 @@ from src.models.auth import AccessToken, AuthorizationCode
 from src.models.mcp import MCPServerConfig, AuthRequirements, AuthRequirementType
 from src.config.settings import AppConfig, PingOneConfig, SecurityConfig, ChatConfig, LangChainConfig
 
+from tests.conftest import TEST_SECURITY_KWARGS
+
 
 @pytest.fixture
 def integration_config():
@@ -45,17 +47,10 @@ def integration_config():
             redirect_uri="https://localhost:8080/oauth/callback",
             realm="alpha"
         ),
-        security=SecurityConfig(
-            encryption_key="integration-test-key-32-chars",
-            token_expiry_buffer_seconds=300,
-            session_timeout_minutes=60,
-            max_retry_attempts=3,
-            retry_backoff_seconds=1
-        ),
+        security=SecurityConfig(**TEST_SECURITY_KWARGS),
         chat=ChatConfig(
             max_message_length=4000,
-            session_timeout_minutes=30,
-            max_concurrent_sessions=100
+            session_cleanup_interval_minutes=30,
         ),
         langchain=LangChainConfig(
             model_name="gpt-3.5-turbo",

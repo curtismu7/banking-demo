@@ -20,21 +20,45 @@
 | **MCP Protocol** | Anthropic MCP 2024-11-05 | AI agent ↔ tool server communication | Standardised tool calling over JSON-RPC / WebSocket |
 | **Session Fixation Prevention** | OWASP | `req.session.regenerate()` after OAuth callback | New session ID post-login prevents pre-auth session hijacking |
 
-**Which are implemented today vs. needed:**
+### 1a. RFCs and specifications we follow (explicit list)
+
+Use this list for compliance slides and diagram legends.
+
+| ID | Document | Role in this app |
+|----|----------|------------------|
+| **RFC 6749** | OAuth 2.0 Authorization Framework | Auth code, client credentials, token endpoint; base for all grants |
+| **RFC 6750** | OAuth 2.0 Bearer Token Usage | `Authorization: Bearer` to Banking API and MCP-related calls |
+| **RFC 7636** | PKCE | Auth code flow for the SPA/BFF (`code_challenge` S256) |
+| **RFC 7662** | OAuth 2.0 Token Introspection | MCP server validates tokens with PingOne |
+| **RFC 8693** | OAuth 2.0 Token Exchange | BFF may exchange session token for MCP-audience token when `MCP_SERVER_RESOURCE_URI` / `mcp_resource_uri` is configured |
+| **RFC 7009** | OAuth 2.0 Token Revocation | Target: revoke on logout (not fully wired end-to-end) |
+| **RFC 7517** | JSON Web Key (JWK) | JWKS URI for verifying JWT signatures |
+| **RFC 7519** | JSON Web Token (JWT) | Access tokens, ID tokens, optional `act` / delegation claims per deployment |
+| **RFC 7591** | OAuth 2.0 Dynamic Client Registration | Optional for agent/client registration flows |
+| **JSON-RPC 2.0** | jsonrpc.org spec | MCP messages over WebSocket (`initialize`, `tools/list`, `tools/call`) |
+| **OpenID Connect Core 1.0** | OIDF | ID Token, `openid` scope, UserInfo |
+| **OpenID Connect CIBA** | OIDF CIBA Core 1.0 | Back-channel consent (e.g. email approval); poll `grant_type` per PingOne |
+| **MCP protocol** | MCP `2024-11-05` | Tool discovery and invocation semantics (this server uses WS + JSON-RPC) |
+
+**Patterns (not single RFCs):** BFF (tokens server-side, session cookie to browser); OWASP session fixation mitigation.
+
+**Which are implemented today vs. gaps:**
 
 | Standard | Status |
 |---|---|
-| OAuth 2.0 Auth Code + PKCE | ✅ Done |
-| JWKS token validation | ✅ Done |
-| OIDC CIBA (email, poll mode) | ✅ Done |
+| OAuth 2.0 Auth Code + PKCE (RFC 6749 + 7636) | ✅ Done |
+| Bearer token usage (RFC 6750) | ✅ Done |
+| JWKS / JWT validation (RFC 7517 + 7519) | ✅ Done |
+| OIDC Core (ID token, userinfo) | ✅ Done |
+| OIDC CIBA (poll / email flow) | ✅ Done (BFF + agent integration as configured) |
 | BFF session pattern | ✅ Done |
-| MCP Protocol | ✅ Done |
-| Scope enforcement | ✅ Done |
-| Token Introspection (MCP server) | ✅ Done |
-| RFC 8693 Token Exchange | ❌ Not implemented |
-| `act` / `may_act` delegation claims | ❌ Not implemented |
-| Token Revocation on logout | ❌ Not implemented |
-| Token Refresh | ❌ Routes exist, logic missing |
+| MCP Protocol (`2024-11-05`) + JSON-RPC 2.0 | ✅ Done |
+| Scope enforcement (API + MCP) | ✅ Done |
+| Token Introspection (RFC 7662) on MCP server | ✅ Done |
+| RFC 8693 Token Exchange | ✅ When `mcp_resource_uri` / `MCP_SERVER_RESOURCE_URI` is set on BFF; PingOne must allow grant + policies |
+| `act` / `may_act` on exchanged tokens | ⚠️ Depends on PingOne token issuance / policy (app supports consuming delegated tokens) |
+| Token Revocation (RFC 7009) on logout | ❌ Target; unified logout clears session |
+| Token Refresh | ❌ Routes exist; refresh logic incomplete |
 
 ---
 

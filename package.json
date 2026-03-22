@@ -5,5 +5,16 @@
   "engines": {
     "node": "20.x",
     "npm": ">=9"
+  },
+  "scripts": {
+    "test": "bash scripts/run-all-tests.sh",
+    "test:api-server": "cd banking_api_server && npm test -- --forceExit",
+    "test:mcp-server": "cd banking_mcp_server && npm run test:unit",
+    "test:mcp-server:integration": "cd banking_mcp_server && npm run test:integration",
+    "test:ui": "cd banking_api_ui && CI=true npm test -- --watchAll=false --passWithNoTests",
+    "test:agent": "cd langchain_agent && bash scripts/run-pytest.sh",
+    "test:agent:full": "cd langchain_agent && bash scripts/run-pytest.sh tests/",
+    "test:agent-ui": "cd langchain_agent/frontend && npm run test:ci",
+    "test:mcp-inspector": "cd banking_api_server && npm test -- --testPathPattern=mcp-inspector --forceExit"
   }
 }

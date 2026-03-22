@@ -16,21 +16,24 @@ flowchart TB
         OAUTH["OAuth Routes\n/api/auth/oauth/*\n/api/auth/ciba/*"]
         SESSION["Session Store\n{ accessToken T1\n  refreshToken\n  idToken }"]
         MCPPROXY["MCP Proxy\nPOST /api/mcp/tool\n→ Token Exchange RFC 8693\n→ WS to MCP Server"]
+        MCPINSP["MCP Inspector (demo)\nGET /api/mcp/inspector/context|tools\nPOST …/invoke\nauthenticateToken + same WS client"]
         BANKAPI["Banking API\n/api/accounts\n/api/transactions"]
         AUTH["auth.js middleware\nauthenticateToken()\nrequireScopes()"]
     end
 
     subgraph MCPSRV["MCP Server — Port 8080 (WebSocket / JSON-RPC)"]
         AUTHMGR["AuthenticationIntegration\ninit: validate token via introspect\ntools/call: check scopes → execute"]
-        TOOLS["BankingToolRegistry\nlist_accounts\nget_account_balance\nlist_transactions\ntransfer / deposit / withdraw"]
-        INTROSPECT["TokenIntrospector\nPingOne introspection\naud validation\nact claim logging"]
+        TOOLS["BankingToolRegistry\nget_my_accounts · get_account_balance\nget_my_transactions\ncreate_transfer · create_deposit\ncreate_withdrawal · query_user_by_email"]
+        INTROSPECT["TokenIntrospector\nPingOne introspection RFC 7662\naud validation"]
     end
 
-    subgraph AGENT["LangChain Agent — Python (MCP Host)"]
-        LLM["ChatOpenAI LLM\nfunction calling"]
+    subgraph AGENT["LangChain Agent — Python (second MCP Host)"]
+        LLM["ChatOpenAI LLM\nstreaming + function calling"]
         MEM["ConversationMemory"]
-        MCPCLIENT["MCPToolProvider\nWS client to MCP Server"]
-        CIBAAUTH["OAuthAuthenticationManager\nCIBA initiation + polling"]
+        MCPCLIENT["MCPToolProvider / MCPClientManager\nWS JSON-RPC + Bearer to MCP"]
+        CIBAAUTH["OAuthAuthenticationManager\nCIBA + client credentials"]
+        WSEVENTS["WebSocket stream_event\ntool_start · tool_end · llm_token"]
+        HOSTJSON["HTTP :8081 /inspector/mcp-host\nregistered tools snapshot"]
     end
 
     subgraph PINGONE["PingOne"]
@@ -48,13 +51,17 @@ flowchart TB
 
     UI -->|"HTTP + session cookie"| OAUTH
     UI -->|"HTTP + session cookie"| MCPPROXY
+    UI -->|"HTTP + session cookie"| MCPINSP
     UI -->|"HTTP + session cookie"| BANKAPI
-    CHAT -->|"HTTP/WS"| AGENT
+    CHAT -->|"WebSocket chat"| AGENT
 
     OAUTH -->|"stores tokens"| SESSION
     SESSION -->|"T1 read"| MCPPROXY
+    SESSION -->|"T1 read"| MCPINSP
     MCPPROXY -->|"RFC 8693\nvalidates may_act"| TOKEN_EP
+    MCPINSP -->|"optional RFC 8693"| TOKEN_EP
     MCPPROXY -->|"WS + T2 delegated\nwith act claim"| AUTHMGR
+    MCPINSP -->|"WS tools/list · tools/call"| AUTHMGR
     BANKAPI --> AUTH
     AUTH -->|"JWKS verify"| JWKS_EP
 
@@ -68,6 +75,8 @@ flowchart TB
     LLM -->|"tool call"| MCPCLIENT
     MCPCLIENT -->|"WS JSON-RPC + T3"| AUTHMGR
     AGENT --> CIBAAUTH
+    LLM -.->|"callbacks"| WSEVENTS
+    AGENT --> HOSTJSON
     CIBAAUTH -->|"POST /bc-authorize"| BCAUTH_EP
     CIBAAUTH -->|"poll POST /token"| TOKEN_EP
     BCAUTH_EP --> DAVINCI
@@ -118,8 +127,8 @@ sequenceDiagram
 
     rect rgb(255, 245, 220)
         Note over U,API: PHASE 3 — User Asks AI Agent for Account Data
-        U->>BFF: POST /api/mcp/tool\n{ tool: list_accounts }\nCookie: session=XYZ
-        BFF->>BFF: Read T1 from session\nLook up tool scopes:\nlist_accounts → banking:accounts:read
+        U->>BFF: POST /api/mcp/tool\n{ tool: get_my_accounts }\nCookie: session=XYZ
+        BFF->>BFF: Read T1 from session\nLook up tool scopes:\nget_my_accounts → banking:accounts:read
     end
 
     rect rgb(255, 220, 220)
@@ -137,10 +146,10 @@ sequenceDiagram
         BFF->>MCP: WS initialize\n{ agentToken: T2 }
         MCP->>P1: POST /introspect token=T2
         P1-->>MCP: { active: true\n  sub: user123\n  aud: https://mcp.banking.internal\n  act: { client_id: bff-client }\n  scope: banking:accounts:read }
-        MCP->>MCP: aud = mcp resource URI ✅\nact.client_id = known BFF client ✅\nscope sufficient for list_accounts ✅\nLog: "user123 delegated via bff-client"
+        MCP->>MCP: aud = mcp resource URI ✅\nact.client_id = known BFF client ✅\nscope sufficient for get_my_accounts ✅\nLog: "user123 delegated via bff-client"
         MCP-->>BFF: handshake OK
 
-        BFF->>MCP: tools/call { list_accounts }
+        BFF->>MCP: tools/call { get_my_accounts }
         MCP->>API: GET /api/accounts\nAuthorization: Bearer T2
         API->>API: Validate T2 (JWKS)\nCheck banking:accounts:read scope ✅\nFilter accounts for sub=user123
         API-->>MCP: [ { id, type, balance }, ... ]
@@ -182,7 +191,7 @@ flowchart TD
         V2["✅ aud matches MCP_SERVER_RESOURCE_URI\n   (configured in MCP server env)"]
         V3["✅ act.client_id = bff-client\n   (proves BFF performed exchange,\n    not a rogue caller)"]
         V4["✅ scope covers required tool scopes"]
-        V5["📋 Audit log:\n   user123 accessed via bff-client delegation\n   tool: list_accounts\n   time: 2026-03-22T..."]
+        V5["📋 Audit log:\n   user123 accessed via bff-client delegation\n   tool: get_my_accounts\n   time: 2026-03-22T..."]
         INTRO-->V1-->V2-->V3-->V4-->V5
     end
 
@@ -226,7 +235,7 @@ sequenceDiagram
     P1-->>MCP: { active, sub=user123, aud=bff ← wrong audience }
     Note over MCP: ⚠️ aud=bff-client, not mcp-server-uri\n❌ no act claim — cannot verify who sent token\n❌ no delegation record for audit\n❌ scope not narrowed for this tool
     MCP-->>BFF: handshake OK (no aud enforcement)
-    BFF->>MCP: tools/call { list_accounts }
+    BFF->>MCP: tools/call { get_my_accounts }
     MCP->>API: GET /api/accounts Bearer T1
     API-->>MCP: accounts data
     MCP-->>BFF: tool result
@@ -250,7 +259,7 @@ sequenceDiagram
 
     Note over B,API: ✅ AFTER — RFC 8693 Token Exchange with may_act validation and act claim
 
-    B->>BFF: POST /api/mcp/tool { tool: list_accounts } (session cookie)
+    B->>BFF: POST /api/mcp/tool { tool: get_my_accounts } (session cookie)
     BFF->>BFF: Read T1 from session\nT1 contains may_act: { client_id: bff-client }\nTool scope: banking:accounts:read
 
     BFF->>P1: POST /token\ngrant_type=token-exchange\nsubject_token=T1\naudience=https://mcp.banking.internal\nscope=banking:accounts:read\nclient_id=bff-client
@@ -262,7 +271,7 @@ sequenceDiagram
     P1-->>MCP: { active, sub, aud=mcp-uri, act={ client_id:bff-client } }
     MCP->>MCP: aud=mcp-server-uri ✅\nact.client_id=bff-client ✅\nscope=accounts:read ✅\nAudit: user123 via bff delegation
     MCP-->>BFF: handshake OK
-    BFF->>MCP: tools/call { list_accounts }
+    BFF->>MCP: tools/call { get_my_accounts }
     MCP->>API: GET /api/accounts Bearer T2
     API->>API: Validate T2 — aud, scope, exp ✅
     API-->>MCP: accounts
@@ -317,7 +326,7 @@ sequenceDiagram
         MCP->>MCP: aud=mcp-server-uri ✅\nact.client_id=ai-agent-client ✅\nAudit: user123 via ai-agent delegation
         MCP-->>LC: handshake OK
 
-        LC->>MCP: tools/call { list_accounts }
+        LC->>MCP: tools/call { get_my_accounts }
         MCP->>API: GET /api/accounts Bearer T3
         API->>API: Validate T3\nCheck banking:accounts:read ✅
         API-->>MCP: [ accounts ]
@@ -389,4 +398,44 @@ flowchart LR
     T1 --> CHECK
     T2 --> MCP_CHECK
     T1 -.->|"attack attempt"| ATTACK
+```
+
+---
+
+## Diagram 9: MCP Inspector — dual hosts (BFF vs LangChain)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Browser (logged-in user)
+    participant UI as React /mcp-inspector
+    participant BFF as Banking BFF :3001
+    participant P1 as PingOne (optional RFC 8693)
+    participant MCP as MCP Server :8080 WS
+    participant AG as LangChain :8081 /inspector/mcp-host
+
+    Note over U,AG: Compare two MCP hosts: BFF session token path vs agent-issued token path.
+
+    U->>UI: Open MCP Inspector (session cookie)
+    UI->>BFF: GET /api/mcp/inspector/context
+    BFF-->>UI: mcpHosts: banking_bff · langchain_agent · shared_mcp_server
+
+    UI->>BFF: GET /api/mcp/inspector/tools
+    BFF->>BFF: getSessionAccessToken()
+    opt mcp_resource_uri configured
+        BFF->>P1: POST /token (RFC 8693 token exchange)
+        P1-->>BFF: MCP-audience access token
+    end
+    BFF->>MCP: WS initialize → tools/list
+    MCP-->>BFF: tool catalog
+    BFF-->>UI: tools + source: bff_session
+
+    U->>UI: Invoke tool (demo)
+    UI->>BFF: POST /api/mcp/inspector/invoke
+    BFF->>MCP: tools/call
+    MCP-->>BFF: result
+    BFF-->>UI: JSON result
+
+    UI->>AG: GET /inspector/mcp-host (agent health port)
+    AG-->>UI: langchain_tools_exposed_to_llm · mcp_client_registry snapshot
 ```

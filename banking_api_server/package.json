@@ -16,6 +16,7 @@
     "test:oauth": "./run-oauth-integration-tests.sh",
     "test:oauth-scope": "jest --testPathPattern=oauth-scope-integration.test.js --verbose --forceExit",
     "test:oauth-e2e": "jest --testPathPattern=oauth-e2e-integration.test.js --verbose --forceExit",
+    "test:mcp-inspector": "jest --testPathPattern=mcp-inspector --forceExit --verbose",
     "test:scope-assignments": "node test-scope-assignments.js",
     "test:oauth-provider-scopes": "node test-oauth-provider-scopes.js",
     "build": "cd client && npm run build",

@@ -6,7 +6,7 @@ import json
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 
-from src.logging import (
+from log_utils import (
     SecureLogger,
     get_secure_logger,
     configure_logging,
@@ -538,7 +538,7 @@ class TestGlobalFunctions:
     
     def test_log_auth_event_function(self):
         """Test log_auth_event convenience function."""
-        with patch('src.logging.auth_flow_logger.get_auth_flow_logger') as mock_get_logger:
+        with patch('log_utils.auth_flow_logger.get_auth_flow_logger') as mock_get_logger:
             mock_logger = Mock()
             mock_get_logger.return_value = mock_logger
             

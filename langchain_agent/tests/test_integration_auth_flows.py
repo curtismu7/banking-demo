@@ -17,9 +17,11 @@ from aioresponses import aioresponses
 
 from src.authentication.oauth_manager import OAuthAuthenticationManager
 from src.models.auth import ClientCredentials, AccessToken
-from src.config.settings import AppConfig, PingOneConfig, SecurityConfig
+from src.config.settings import AppConfig, PingOneConfig, SecurityConfig, LangChainConfig
 from src.storage.secure_storage import SecureStorage
 from src.storage.token_cache import TokenCache
+
+from tests.conftest import TEST_SECURITY_KWARGS
 
 
 @pytest.fixture
@@ -38,15 +40,10 @@ def integration_config():
             redirect_uri="https://localhost:8080/oauth/callback",
             realm="alpha"
         ),
-        security=SecurityConfig(
-            encryption_key="integration-test-key-32-chars",
-            token_expiry_buffer_seconds=300,
-            session_timeout_minutes=60,
-            max_retry_attempts=3,
-            retry_backoff_seconds=1
-        ),
+        security=SecurityConfig(**TEST_SECURITY_KWARGS),
         mcp=MagicMock(),
-        chat=MagicMock()
+        chat=MagicMock(),
+        langchain=LangChainConfig(),
     )
 
 

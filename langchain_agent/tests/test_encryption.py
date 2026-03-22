@@ -128,9 +128,10 @@ class TestEncryptionManager:
             EncryptionManager()
     
     @patch('src.security.encryption.logging')
-    @patch.dict(os.environ, {'ENCRYPTION_MASTER_KEY': 'test-key'})
-    def test_generated_salt_warning(self, mock_logging):
+    def test_generated_salt_warning(self, mock_logging, monkeypatch):
         """Test that a warning is logged when salt is generated."""
+        monkeypatch.setenv('ENCRYPTION_MASTER_KEY', 'test-key')
+        monkeypatch.delenv('ENCRYPTION_SALT', raising=False)
         EncryptionManager()
         
         mock_logging.warning.assert_called_once()

@@ -1,0 +1,159 @@
+/**
+ * @file mcp-inspector.test.js
+ * @description Tests for authenticated MCP Inspector routes (context, tools/list, tools/call).
+ * MCP WebSocket I/O is mocked; auth uses Bearer tokens with SKIP_TOKEN_SIGNATURE_VALIDATION.
+ */
+
+const request = require('supertest');
+
+const mockList = jest.fn();
+const mockCall = jest.fn();
+
+jest.mock('../../services/mcpWebSocketClient', () => {
+  const actual = jest.requireActual('../../services/mcpWebSocketClient');
+  return {
+    ...actual,
+    /** Inspector routes use session tokens in production; tests send Bearer only. */
+    getSessionAccessToken: (req) => {
+      const auth = req.headers?.authorization;
+      if (auth && auth.startsWith('Bearer ')) {
+        return auth.slice(7).trim();
+      }
+      return actual.getSessionAccessToken(req);
+    },
+    mcpListTools: (...args) => mockList(...args),
+    mcpCallTool: (...args) => mockCall(...args),
+  };
+});
+
+const mockPerformTokenExchange = jest.fn();
+
+jest.mock('../../services/oauthService', () => {
+  const actual = jest.requireActual('../../services/oauthService');
+  return {
+    ...actual,
+    performTokenExchange: (...args) => mockPerformTokenExchange(...args),
+  };
+});
+
+const app = require('../../server');
+const configStore = require('../../services/configStore');
+
+/** Builds a JWT-shaped string that passes decode-only validation in tests. */
+function bearerToken(scopes = ['banking:accounts:read']) {
+  const payload = {
+    sub: 'inspector-test-user',
+    preferred_username: 'inspector',
+    email: 'inspector@test.com',
+    scope: Array.isArray(scopes) ? scopes.join(' ') : scopes,
+    iss: 'https://auth.pingone.com/test-env',
+    aud: 'banking_jk_enduser',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(Date.now() / 1000),
+  };
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64');
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
+  return `${encodedHeader}.${encodedPayload}.sig`;
+}
+
+describe('MCP Inspector routes', () => {
+  let getEffectiveSpy;
+  let origGetEffective;
+
+  beforeEach(() => {
+    mockList.mockResolvedValue({
+      tools: [{ name: 'get_my_accounts', description: 'List accounts' }],
+    });
+    mockCall.mockResolvedValue({ content: [{ type: 'text', text: '{"ok":true}' }] });
+    mockPerformTokenExchange.mockImplementation((token) => Promise.resolve(`exchanged:${token}`));
+    origGetEffective = configStore.getEffective.bind(configStore);
+    getEffectiveSpy = jest.spyOn(configStore, 'getEffective').mockImplementation((key) => {
+      if (key === 'mcp_resource_uri') return '';
+      return origGetEffective(key);
+    });
+  });
+
+  afterEach(() => {
+    getEffectiveSpy.mockRestore();
+  });
+
+  it('GET /api/mcp/inspector/context returns host narrative and MCP version', async () => {
+    const res = await request(app)
+      .get('/api/mcp/inspector/context')
+      .set('Authorization', `Bearer ${bearerToken()}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe('mcp_host_proxy');
+    expect(res.body.mcpProtocolVersion).toBe('2024-11-05');
+    expect(res.body.mcpHosts).toMatchObject({
+      bff: expect.objectContaining({ id: 'bff' }),
+      langchain: expect.objectContaining({ id: 'langchain' }),
+    });
+    expect(res.body.tokenExchangeEnabled).toBe(false);
+  });
+
+  it('GET /api/mcp/inspector/tools returns 401 without authentication', async () => {
+    const res = await request(app).get('/api/mcp/inspector/tools');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/mcp/inspector/tools returns tools from mcpListTools', async () => {
+    const token = bearerToken();
+    const res = await request(app)
+      .get('/api/mcp/inspector/tools')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.tools).toHaveLength(1);
+    expect(res.body.tools[0].name).toBe('get_my_accounts');
+    expect(mockList).toHaveBeenCalledWith(token);
+    expect(res.body.timingsMs).toHaveProperty('roundTrip');
+  });
+
+  it('POST /api/mcp/inspector/invoke returns 400 when tool is missing', async () => {
+    const res = await request(app)
+      .post('/api/mcp/inspector/invoke')
+      .set('Authorization', `Bearer ${bearerToken()}`)
+      .send({ params: {} });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/tool/i);
+  });
+
+  it('POST /api/mcp/inspector/invoke calls mcpCallTool with session token when exchange off', async () => {
+    const token = bearerToken(['banking:accounts:read', 'banking:transactions:read']);
+
+    const res = await request(app)
+      .post('/api/mcp/inspector/invoke')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tool: 'get_my_accounts', params: {} });
+
+    expect(res.status).toBe(200);
+    expect(res.body.result).toEqual({ content: [{ type: 'text', text: '{"ok":true}' }] });
+    expect(res.body.inspector.tool).toBe('get_my_accounts');
+    expect(mockCall).toHaveBeenCalledWith('get_my_accounts', {}, token);
+    expect(mockPerformTokenExchange).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/mcp/inspector/invoke uses RFC 8693 exchange when mcp_resource_uri is set', async () => {
+    getEffectiveSpy.mockImplementation((key) => {
+      if (key === 'mcp_resource_uri') return 'https://mcp-resource.example/aud';
+      return origGetEffective(key);
+    });
+
+    const token = bearerToken();
+    const res = await request(app)
+      .post('/api/mcp/inspector/invoke')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tool: 'get_my_accounts', params: {} });
+
+    expect(res.status).toBe(200);
+    expect(mockPerformTokenExchange).toHaveBeenCalledWith(
+      token,
+      'https://mcp-resource.example/aud',
+      ['banking:accounts:read']
+    );
+    expect(mockCall).toHaveBeenCalledWith('get_my_accounts', {}, `exchanged:${token}`);
+  });
+});

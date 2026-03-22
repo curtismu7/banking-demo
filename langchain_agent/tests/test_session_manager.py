@@ -10,14 +10,14 @@ from src.api.session_manager import SessionManager
 from src.models.chat import ChatSession, ChatMessage, MessageRole
 from src.config.settings import SecurityConfig, ChatConfig, AppConfig
 
+from tests.conftest import TEST_SECURITY_KWARGS
+
 
 @pytest.fixture
 def mock_config():
     """Create a mock configuration."""
     security_config = SecurityConfig(
-        encryption_key="test-key",
-        session_timeout_minutes=30,
-        max_retry_attempts=3
+        **{**TEST_SECURITY_KWARGS, "session_timeout_minutes": 30}
     )
     
     chat_config = ChatConfig(

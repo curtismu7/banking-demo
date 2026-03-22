@@ -13,13 +13,16 @@ flowchart TB
         Dashboard["Admin Dashboard\n/admin /transactions /users /accounts"]
         UserDash["User Dashboard\n/dashboard"]
         SecuritySettings["Security Settings\n/settings — Step-up + Authorize config"]
-        ChatWidget["AI Chat Widget\n(WebSocket to MCP)"]
+        ChatWidget["AI Chat Widget\nWebSocket → LangChain chat\n(stream_event + reply)"]
+        McpInspector["MCP Inspector\n/mcp-inspector\nBFF tools/list · invoke"]
     end
 
     %% ── API Server ────────────────────────────────────────────────────────────
     subgraph API["banking_api_server  (Express · Node.js · port 3001)"]
         direction TB
         AuthRoutes["/api/auth\n/api/auth/oauth\n/api/auth/oauth/user"]
+        CibaRoutes["/api/auth/ciba/*\ninitiate · poll · notify\nOIDC CIBA"]
+        McpInspectorRoutes["/api/mcp/inspector\ncontext · tools · invoke\n+ mcpWebSocketClient"]
         TxRoutes["/api/transactions\ndeposit · withdrawal · transfer"]
         AdminRoutes["/api/admin/settings\nGET · PUT runtime config"]
         UserRoutes["/api/users"]
@@ -58,22 +61,23 @@ flowchart TB
 
     %% ── MCP Server ────────────────────────────────────────────────────────────
     subgraph MCP["banking_mcp_server  (TypeScript · WebSocket · port 8080)"]
-        MCPProtocol["MCP Protocol Handler\n(Model Context Protocol)"]
-        MCPTools["Tools: get_account_balance\ncreate_transaction · get_transactions\nget_user_info · transfer_funds"]
-        MCPAuth["Token exchange\nclient_credentials scope validation"]
+        MCPProtocol["MCP + JSON-RPC 2.0\ninitialize · tools/list · tools/call"]
+        MCPTools["Tools: get_my_accounts · get_account_balance\nget_my_transactions\ncreate_transfer · create_deposit\ncreate_withdrawal · query_user_by_email"]
+        MCPAuth["Bearer + introspection RFC 7662\nscope per tool · optional RFC 8693 act"]
     end
 
     %% ── LangChain Agent ───────────────────────────────────────────────────────
-    subgraph Agent["langchain_agent  (Python · FastAPI · port 8888)"]
-        FastAPI["FastAPI  /chat  /health"]
-        LangChain["LangChain AgentExecutor\ngpt-3.5-turbo / gpt-4"]
-        MCPClientPy["MCP Client\n(WebSocket)"]
+    subgraph Agent["langchain_agent  (Python · FastAPI + WS)"]
+        FastAPI["HTTP API + chat WebSocket\n(WEBSOCKET_PORT)"]
+        HealthInsp["Health :8081\n/health · /inspector/mcp-host"]
+        LangChain["LangChain agent\nstreaming · tool calls"]
+        MCPClientPy["MCP Client\nWebSocket JSON-RPC + Bearer"]
     end
 
     %% ── External Services ─────────────────────────────────────────────────────
     subgraph PingOneCloud["☁️ PingOne  (auth.pingone.com / {region})"]
         direction LR
-        OIDC_AS["Authorization Server\n/as/authorize  /as/token  /as/userinfo"]
+        OIDC_AS["Authorization Server\n/as/authorize  /as/token  /as/userinfo\n/as/introspect  (RFC 7662)"]
         JWKS["JWKS Endpoint\n/as/jwks  (RFC 7517)"]
         UserMgmt["User Management API\n/v1/environments/{env}/users"]
         AppRegistration["Dynamic Client Registration\n/as/registration  (RFC 7591)"]
@@ -95,17 +99,20 @@ flowchart TB
     Dashboard -->|"GET /api/admin/settings"| AdminRoutes
     SecuritySettings -->|"GET · PUT /api/admin/settings"| AdminRoutes
     UserDash -->|"GET /api/transactions/my"| TxRoutes
-    ChatWidget -->|"WebSocket"| MCPProtocol
+    ChatWidget -->|"WebSocket chat\n+ stream_event"| FastAPI
 
-    %% ── Connections: UI → MCP ─────────────────────────────────────────────────
-    ChatWidget -->|"WebSocket  MCP Protocol"| MCPProtocol
+    McpInspector -->|"session cookie"| McpInspectorRoutes
+    McpInspector -.->|"optional: GET /inspector/mcp-host"| HealthInsp
 
     %% ── Connections: API ↔ PingOne ────────────────────────────────────────────
     AuthRoutes -->|"PKCE auth code exchange\nRFC 6749 §4.1 · RFC 7636"| OIDC_AS
+    CibaRoutes -->|"CIBA bc-authorize + poll token\nOIDF CIBA Core"| OIDC_AS
     AuthMW -->|"JWKS token validation\nRFC 7519 · RFC 7517"| JWKS
     AuthorizeService -->|"client_credentials  RFC 6749 §4.4\nPDP evaluate  POST"| PingOneAuthorize
     AuthRoutes -->|"Dynamic registration  RFC 7591"| AppRegistration
     AdminRoutes -->|"User Management API"| UserMgmt
+    McpInspectorRoutes -->|"optional RFC 8693"| OIDC_AS
+    McpInspectorRoutes -->|"WS MCP"| MCPProtocol
 
     %% ── Connections: Gates → Services ─────────────────────────────────────────
     TxRoutes --> StepUpGate
@@ -135,14 +142,17 @@ flowchart TB
 
     %% ── Standards Legend ──────────────────────────────────────────────────────
     subgraph Standards["Standards & Protocols"]
-        direction LR
+        direction TB
         S1["RFC 6749 — OAuth 2.0"]
-        S2["RFC 7636 — PKCE"]
-        S3["OIDC Core 1.0 — ID Tokens"]
-        S4["RFC 7519 — JWT"]
-        S5["RFC 7517 — JWKS"]
-        S6["RFC 7591 — Dynamic Client Reg"]
-        S7["MCP — Model Context Protocol"]
+        S2["RFC 6750 — Bearer"]
+        S3["RFC 7636 — PKCE"]
+        S4["RFC 7662 — Token Introspection"]
+        S5["RFC 8693 — Token Exchange"]
+        S6["RFC 7009 — Revocation (target)"]
+        S7["RFC 7517 / 7519 — JWK / JWT"]
+        S8["OIDC Core + CIBA"]
+        S9["JSON-RPC 2.0 + MCP 2024-11-05"]
+        S10["RFC 7591 — Dynamic Client Reg"]
     end
 
     %% ── Styling ───────────────────────────────────────────────────────────────
@@ -154,8 +164,8 @@ flowchart TB
     classDef standard fill:#f2f3f4,stroke:#95a5a6,color:#566573
 
     class PingOneCloud,PingOneAuthorize,OpenAI external
-    class UI,Login,Dashboard,UserDash,SecuritySettings,ChatWidget frontend
-    class API,AuthRoutes,TxRoutes,AdminRoutes,UserRoutes,AccountRoutes,Health,Middleware,Gates,RuntimeSettings,DataStore,AuthorizeService,OAuthMonitor backend
+    class UI,Login,Dashboard,UserDash,SecuritySettings,ChatWidget,McpInspector frontend
+    class API,AuthRoutes,CibaRoutes,McpInspectorRoutes,TxRoutes,AdminRoutes,UserRoutes,AccountRoutes,Health,Middleware,Gates,RuntimeSettings,DataStore,AuthorizeService,OAuthMonitor backend
     class MCP,MCPProtocol,MCPTools,MCPAuth mcp
-    class Agent,FastAPI,LangChain,MCPClientPy agent
-    class Standards,S1,S2,S3,S4,S5,S6,S7 standard
+    class Agent,FastAPI,HealthInsp,LangChain,MCPClientPy agent
+    class Standards,S1,S2,S3,S4,S5,S6,S7,S8,S9,S10 standard

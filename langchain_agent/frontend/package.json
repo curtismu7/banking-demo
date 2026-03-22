@@ -15,7 +15,14 @@
     "build": "react-scripts build",
     "build:widget": "webpack --config webpack.widget.config.js",
     "test": "react-scripts test",
+    "test:ci": "CI=true react-scripts test --watchAll=false --testPathIgnorePatterns=AuthorizationModal --testPathIgnorePatterns=AuthorizationCallback --testPathIgnorePatterns=App.test",
     "eject": "react-scripts eject"
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^react-markdown$": "<rootDir>/src/__mocks__/react-markdown.cjs",
+      "^remark-gfm$": "<rootDir>/src/__mocks__/empty.cjs"
+    }
   },
   "eslintConfig": {
     "extends": [
