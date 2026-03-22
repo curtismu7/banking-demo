@@ -6,7 +6,7 @@
 'use strict';
 
 const configStore = require('./configStore');
-const { getCanonicalPublicOrigin } = require('./vercelPublicUrl');
+const { getCanonicalPublicOrigin, OFFICIAL_DEMO_ORIGIN } = require('./vercelPublicUrl');
 
 /** Public hostname for this request (Vercel often sets x-forwarded-host). */
 function getPublicHost(req) {
@@ -92,6 +92,17 @@ function getOAuthRedirectDebugInfo(req) {
     userRedirectUri: user,
     requestHost: getPublicHost(req),
     pingOneRegisterThese: [...new Set([admin, user])],
+    /** Stable production alias for this repo’s Vercel deployment (allowlist in PingOne). */
+    stableDemoOrigin: OFFICIAL_DEMO_ORIGIN,
+    instructions: {
+      summary:
+        'In PingOne, each OAuth application (Admin app and Customer app) must list its redirect URI exactly as shown below — same scheme, host, and path.',
+      steps: [
+        'PingOne Admin → Applications → select the Admin (staff) app → Configuration → Redirect URIs → Add URI → paste the Admin redirect URI below.',
+        'PingOne Admin → Applications → select the End-user (customer) app → Configuration → Redirect URIs → Add URI → paste the Customer redirect URI below.',
+        'Save both applications. Sign-in uses Authorization Code + PKCE; the callback path is always under /api/auth/oauth/ on this server.',
+      ],
+    },
     warnings,
   };
 }

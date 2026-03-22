@@ -127,6 +127,8 @@ export default function Config() {
   const [testResult, setTestResult] = useState(null);
   // Admin password for Vercel (since serverless sessions don't persist)
   const [configPassword, setConfigPassword] = useState('');  // matches ADMIN_CONFIG_PASSWORD env var
+  /** Server-computed OAuth redirect URIs for PingOne allowlists */
+  const [redirectInfo, setRedirectInfo] = useState(null);
 
   // ── Fetch from server + merge with IndexedDB cache ──
   const loadConfig = useCallback(async () => {
@@ -284,7 +286,7 @@ export default function Config() {
             <h1 style={{ fontSize: '1.5rem', fontWeight: 600 }}>⚙️ Application Configuration</h1>
             <p style={{ fontSize: '0.875rem', opacity: 0.85, marginTop: '0.25rem' }}>
               {deploymentManaged ? (
-                <><strong>Vercel:</strong> PingOne OAuth clients (admin, customer, and Authorize worker) are <strong>pre-configured on the server</strong>. Visitors use <strong>Admin</strong> and <strong>Customer</strong> sign-in — this page does not collect client IDs or secrets.{' '}</>
+                <><strong>Hosted:</strong> OAuth client credentials live <strong>on the server</strong> (backend defaults and/or deployment secrets — not entered by visitors). Use <strong>Admin</strong> and <strong>Customer</strong> sign-in on the login page. Register the redirect URIs below in PingOne.{' '}</>
               ) : (
                 <><strong>Local:</strong> configure PingOne apps here (admin + end-user). Stored in SQLite.{' '}</>
               )}
@@ -319,7 +321,7 @@ export default function Config() {
             marginBottom: '1.5rem',
             color: '#1e40af',
           }}>
-            <strong>Read-only mode (Vercel, no KV):</strong> Settings must come from environment variables (or connect Vercel KV / Upstash and redeploy). On <strong>localhost</strong>, the app uses SQLite and this page can save all fields, including separate admin and user OAuth apps when not on Vercel.
+            <strong>Read-only mode (Vercel, no KV):</strong> Runtime PingOne fields are supplied by the deployment (server-side). Connect <strong>Vercel KV / Upstash</strong> if you need to edit values from this UI. On <strong>localhost</strong>, SQLite stores configuration locally.
           </div>
         )}
 
@@ -333,7 +335,106 @@ export default function Config() {
             color: '#065f46',
             fontSize: '0.9rem',
           }}>
-            <strong>Hosted deployment:</strong> OAuth <strong>client IDs and secrets</strong> (authorization + worker token) are stored in the backend — not entered here. The <strong>login page still has both</strong> <em>Admin sign-in</em> and <em>Customer sign-in</em>; each flow uses the server-side configuration. Below: reference redirect URIs only.
+            <strong>Hosted deployment:</strong> <strong>Client IDs and secrets</strong> are configured on the server (not on this screen). You only need to <strong>register the redirect URIs</strong> in PingOne for your Admin and Customer apps — see the blue box below for the exact values.
+          </div>
+        )}
+
+        {redirectInfo && !redirectInfo.error && (
+          <div className="card" style={{
+            marginBottom: '1.5rem',
+            borderColor: '#818cf8',
+            background: 'linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%)',
+          }}>
+            <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.35rem' }}>
+              <h2 className="card-title" style={{ margin: 0 }}>Register these redirect URIs in PingOne</h2>
+              <p style={{ fontSize: '0.85rem', color: '#3730a3', margin: 0, lineHeight: 1.55 }}>
+                {redirectInfo.instructions?.summary || 'Each PingOne OAuth app must allowlist its callback URL exactly (scheme, host, path).'}
+                {' '}
+                {redirectInfo.stableDemoOrigin && (
+                  <span>
+                    Production alias for this demo: <code style={{ background: 'rgba(255,255,255,0.7)', padding: '0.1rem 0.35rem', borderRadius: 4 }}>{redirectInfo.stableDemoOrigin}</code>
+                  </span>
+                )}
+              </p>
+            </div>
+            <ol style={{ margin: '0 0 1rem 0', paddingLeft: '1.25rem', fontSize: '0.85rem', color: '#312e81', lineHeight: 1.6 }}>
+              {(redirectInfo.instructions?.steps || []).map((step, i) => (
+                <li key={i} style={{ marginBottom: '0.35rem' }}>{step}</li>
+              ))}
+            </ol>
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#312e81', marginBottom: '0.35rem' }}>Admin (staff) app — Redirect URI</div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <code style={{
+                    flex: '1 1 240px',
+                    fontSize: '0.78rem',
+                    padding: '0.5rem 0.65rem',
+                    background: 'rgba(255,255,255,0.85)',
+                    borderRadius: 6,
+                    border: '1px solid #c7d2fe',
+                    wordBreak: 'break-all',
+                  }}>{redirectInfo.adminRedirectUri}</code>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(redirectInfo.adminRedirectUri);
+                      toast.success('Admin redirect URI copied');
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#312e81', marginBottom: '0.35rem' }}>Customer (end-user) app — Redirect URI</div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <code style={{
+                    flex: '1 1 240px',
+                    fontSize: '0.78rem',
+                    padding: '0.5rem 0.65rem',
+                    background: 'rgba(255,255,255,0.85)',
+                    borderRadius: 6,
+                    border: '1px solid #c7d2fe',
+                    wordBreak: 'break-all',
+                  }}>{redirectInfo.userRedirectUri}</code>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(redirectInfo.userRedirectUri);
+                      toast.success('Customer redirect URI copied');
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+            {redirectInfo.canonicalOrigin && (
+              <p style={{ fontSize: '0.75rem', color: '#4338ca', marginTop: '1rem', marginBottom: 0 }}>
+                Canonical origin used for callbacks: <code>{redirectInfo.canonicalOrigin}</code>
+                {redirectInfo.requestHost && (
+                  <> · Request host: <code>{redirectInfo.requestHost}</code></>
+                )}
+              </p>
+            )}
+            {(redirectInfo.warnings || []).length > 0 && (
+              <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: '#92400e' }}>
+                {(redirectInfo.warnings || []).map((w, i) => (
+                  <p key={i} style={{ margin: '0.25rem 0' }}>⚠ {w}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {redirectInfo?.error && (
+          <div className="card" style={{ marginBottom: '1.5rem', borderColor: '#fecaca', background: '#fef2f2' }}>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: '#991b1b' }}>Could not load redirect URI info: {redirectInfo.error}</p>
           </div>
         )}
 
@@ -362,9 +463,10 @@ export default function Config() {
           <ol style={{ margin: 0, padding: '0 0 0 1.25rem', fontSize: '0.875rem', color: '#374151', lineHeight: 1.65 }}>
             {deploymentManaged ? (
               <>
-                <li>You do <strong>not</strong> configure PingOne OAuth client credentials on this page — they are set in the deployment (environment / KV).</li>
-                <li>Use <strong>Admin sign-in</strong> and <strong>Customer sign-in</strong> on the login page; both flows are available and use the pre-configured backend settings.</li>
-                <li>Optional: adjust other settings below if your deployment allows it (read-only mode may apply when KV is not attached).</li>
+                <li>Copy the <strong>Admin</strong> and <strong>Customer</strong> redirect URIs from the <strong>Register these redirect URIs in PingOne</strong> section above into each PingOne application’s allowlist.</li>
+                <li>OAuth client IDs and secrets are stored <strong>on the server</strong> — visitors do not enter them here.</li>
+                <li>Use <strong>Admin sign-in</strong> and <strong>Customer sign-in</strong> on the login page.</li>
+                <li>Optional: other fields below may be read-only unless KV is connected.</li>
               </>
             ) : (
               <>
@@ -478,33 +580,10 @@ export default function Config() {
           {deploymentManaged ? (
             <div className="card" style={{ borderColor: '#a7f3d0', background: '#f8fffc' }}>
               <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.35rem' }}>
-                <h2 className="card-title" style={{ margin: 0 }}>PingOne OAuth (deployment)</h2>
+                <h2 className="card-title" style={{ margin: 0 }}>PingOne OAuth (server-side)</h2>
                 <span style={{ fontSize: '0.8rem', color: '#374151', lineHeight: 1.5 }}>
-                  Admin and Customer sign-in each use OAuth clients configured <strong>on the server</strong> (not on this screen). The login page offers <strong>both</strong> buttons — Admin and Customer — with different PingOne redirect URIs. Client IDs, client secrets, and worker credentials are supplied by the deployment.
+                  Admin and Customer apps use client credentials stored <strong>on the backend</strong>. Redirect URIs you must add in PingOne are in the <strong>“Register these redirect URIs”</strong> section above (copy/paste). You do not type client secrets on this page.
                 </span>
-              </div>
-              <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 1rem 0' }}>
-                Reference only — register these in PingOne if you operate the tenant:
-              </p>
-              <div style={{ display: 'grid', gap: '1rem' }}>
-                <TextField
-                  label="Admin OAuth redirect URI (reference)"
-                  fieldKey="admin_redirect_uri"
-                  value={form.admin_redirect_uri}
-                  onChange={handleChange}
-                  placeholder={`${window.location.origin}/api/auth/oauth/callback`}
-                  help="Callback for Admin sign-in flow."
-                  disabled
-                />
-                <TextField
-                  label="Customer OAuth redirect URI (reference)"
-                  fieldKey="user_redirect_uri"
-                  value={form.user_redirect_uri}
-                  onChange={handleChange}
-                  placeholder={`${window.location.origin}/api/auth/oauth/user/callback`}
-                  help="Callback for Customer sign-in flow."
-                  disabled
-                />
               </div>
             </div>
           ) : (

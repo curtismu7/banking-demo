@@ -15,6 +15,9 @@ function stripTrailingSlash(s) {
   return (s || '').trim().replace(/\/+$/, '');
 }
 
+/** Stable hostname for the public Banking demo (PingOne redirect URI allowlist). */
+const OFFICIAL_DEMO_ORIGIN = 'https://banking-demo-puce.vercel.app';
+
 function getCanonicalPublicOrigin() {
   const explicit = stripTrailingSlash(process.env.PUBLIC_APP_URL || process.env.REACT_APP_CLIENT_URL);
   if (explicit) return explicit;
@@ -25,7 +28,14 @@ function getCanonicalPublicOrigin() {
     return `https://${host}`;
   }
 
+  // Vercel preview URLs change per deploy; use a single production alias for OAuth redirect_uri.
+  if (process.env.VERCEL) {
+    return OFFICIAL_DEMO_ORIGIN;
+  }
+
   return null;
 }
 
-module.exports = { getCanonicalPublicOrigin };
+module.exports.OFFICIAL_DEMO_ORIGIN = OFFICIAL_DEMO_ORIGIN;
+
+module.exports.getCanonicalPublicOrigin = getCanonicalPublicOrigin;

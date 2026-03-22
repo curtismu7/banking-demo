@@ -22,6 +22,7 @@ const axios   = require('axios');
 const router  = express.Router();
 const configStore = require('../services/configStore');
 const { FIELD_DEFS, SECRET_KEYS } = require('../services/configStore');
+const { getOAuthRedirectDebugInfo } = require('../services/oauthRedirectUris');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,6 +66,12 @@ function requireAdminOrUnconfigured(req, res, next) {
 router.get('/', async (req, res) => {
   try {
     await configStore.ensureInitialized();
+    let redirectInfo = null;
+    try {
+      redirectInfo = getOAuthRedirectDebugInfo(req);
+    } catch (e) {
+      redirectInfo = { error: e.message };
+    }
     res.json({
       config:       configStore.getMasked(),
       isConfigured: configStore.isConfigured(),
@@ -72,6 +79,8 @@ router.get('/', async (req, res) => {
       readOnly:     configStore.isReadOnly(),
       /** Vercel: PingOne OAuth clients (admin, customer, worker) are set in deployment env/KV — not collected in this UI. */
       deploymentManagedPingOneOAuth: !!process.env.VERCEL,
+      /** Exact redirect URIs to register in PingOne for this deployment (server-computed). */
+      redirectInfo,
     });
   } catch (err) {
     console.error('[adminConfig] GET error:', err.message);
