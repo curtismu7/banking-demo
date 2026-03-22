@@ -244,7 +244,7 @@ export class MCPMessageHandler {
 
       if (!authResult.success) {
         if (authResult.authChallenge) {
-          // --- CIBA: use push notification when the user's email is available ---
+          // --- CIBA: out-of-band approval (email or push per PingOne) when user email is available ---
           const userEmail = context.userEmail
             || (context.session ? this.sessionManager.getSessionEmail(context.session.sessionId) : undefined);
           const cibaEnabled = process.env.CIBA_ENABLED === 'true';

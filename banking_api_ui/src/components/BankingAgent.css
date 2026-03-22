@@ -163,6 +163,117 @@
   color: #6f6f6f;
 }
 
+.banking-agent-learn-btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f62fe;
+  background: #fff;
+  border: 1px solid #c6d4ff;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.banking-agent-learn-btn:hover {
+  background: #edf2ff;
+}
+
+.banking-agent-ctrl {
+  padding: 0 12px 10px;
+  border-bottom: 1px solid #e8e8e8;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.banking-agent-learn-toggle {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f62fe;
+  background: #f4f4f4;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.banking-agent-learn-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.banking-agent-learn-chip {
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  border: 1px solid #c6d4ff;
+  background: #fff;
+  color: #1e40af;
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.25;
+}
+
+.banking-agent-learn-chip:hover {
+  background: #eff6ff;
+}
+
+.banking-agent-nl-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #525252;
+  margin-bottom: 4px;
+}
+
+.banking-agent-nl-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.banking-agent-nl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.banking-agent-nl-send {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #0f62fe;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.banking-agent-nl-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.banking-agent-nl-meta {
+  font-size: 10px;
+  color: #6f6f6f;
+}
+
 .banking-agent-msg {
   display: flex;
   align-items: flex-end;

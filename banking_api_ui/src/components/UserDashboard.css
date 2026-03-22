@@ -214,6 +214,39 @@
   box-shadow: 0 2px 6px rgba(30, 64, 175, 0.12);
 }
 
+.dashboard-edu-btn {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1e40af;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dashboard-edu-btn:hover {
+  background: #fff;
+}
+
+.token-payload-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.token-payload-hint {
+  border: none;
+  background: #e0e7ff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
 /* Token Info Button */
 .token-info-btn {
   background: rgba(255, 255, 255, 0.2);

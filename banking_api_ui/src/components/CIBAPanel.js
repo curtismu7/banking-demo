@@ -28,10 +28,10 @@ const SEQUENCE_DIAGRAM = `
 
 2. PingOne ◀─────────────────────────── auth_req_id returned
 
-3. PingOne ──push notification──────▶ User's Phone
-   "Banking App: Approve $500 transfer"
+3. PingOne ──out-of-band approval────▶ User (channel is your PingOne / DaVinci setup)
+   • Email: approval link in inbox  — OR —  • Push: notification on registered device
 
-4. User taps ✅ Approve on phone
+4. User approves (link in email or tap Approve on device)
 
 5. App polls POST /token (grant=ciba, auth_req_id=...)
    → authorization_pending (repeat every 5s)
@@ -52,8 +52,8 @@ Without CIBA (current):
 With CIBA:
   Chat UI → MCP server needs tokens
   → Server sends bc-authorize to PingOne
-  → Push notification lands on user's phone
-  → User taps Approve — never leaves chat
+  → PingOne delivers approval (email link or push — your DaVinci config)
+  → User approves out-of-band — never leaves chat
   → Tokens arrive at server silently
   ✅  Fluid, in-context, no redirect needed
 `;
@@ -69,9 +69,9 @@ Without CIBA:
 
 With CIBA:
   User clicks Transfer $500
-  → UI shows "Check your phone" overlay
-  → Push: "Banking App: Approve $500 transfer"
-  → User taps Approve
+  → UI shows "Check your email or device" overlay (wording depends on PingOne)
+  → PingOne sends approval (email or push per your setup)
+  → User approves out-of-band
   → Transfer executes immediately
   ✅  No redirect, no page reload
 `;
@@ -143,7 +143,7 @@ const FULL_STACK_DIAGRAM = `
   https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/
 
 ── This banking demo maps: Web SPA → Banking BFF → PingOne AS → MCP server → Banking RS ──
-   CIBA: POST /bc-authorize + poll /token  (parallel track for push approval)
+   CIBA: POST /bc-authorize + poll /token  (parallel track; email or push per PingOne)
 `;
 
 const OAUTH_API_CHEATSHEET = `
@@ -252,18 +252,20 @@ const PINGONE_STEPS = [
   },
   {
     step: '3',
-    title: 'Enable Push MFA Policy',
-    detail: 'Authentication → Policies → (your MFA policy) → ensure Push Notification is enabled (PingID / MS Authenticator).',
+    title: 'Email-only CIBA = no MFA push required',
+    detail:
+      'In DaVinci, configure the CIBA flow to send an approval email (notification template with approve link). Users confirm in their inbox — you do not need PingOne MFA push or a registered authenticator app for that path.',
   },
   {
     step: '4',
-    title: 'Set CIBA_ENABLED=true',
-    detail: 'In your .env or Vercel environment variables, add: CIBA_ENABLED=true',
+    title: 'Optional — push approval instead of email',
+    detail:
+      'If your DaVinci flow delivers CIBA via push to a device, enable Push Notification in your MFA policy and register PingID / MS Authenticator (or your IdP’s device MFA). Email vs push is chosen in PingOne, not in this app.',
   },
   {
     step: '5',
-    title: 'Users Must Have a Registered Device',
-    detail: 'Each user needs a push-capable authenticator registered (PingID app or Microsoft Authenticator via Azure AD federation).',
+    title: 'Set CIBA_ENABLED=true',
+    detail: 'In your .env or Vercel environment variables, add: CIBA_ENABLED=true',
   },
 ];
 
@@ -406,7 +408,7 @@ function TryItTab({ cibaStatus }) {
       setExpiresAt(Date.now() + data.expires_in * 1000);
       setStatus('pending');
       log(`auth_req_id: ${data.auth_req_id.slice(0, 12)}…  expires in ${data.expires_in}s`);
-      log(`push sent to: ${data.login_hint_display}`);
+      log(`CIBA requested for: ${data.login_hint_display}`);
     } catch (err) {
       setStatus('error');
       const d = err.response?.data;
@@ -423,8 +425,8 @@ function TryItTab({ cibaStatus }) {
           configure PingOne (see the Setup tab) to try a live demo.
         </div>
         <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '1rem' }}>
-          Once enabled, this tab lets you initiate a real push notification and watch
-          the polling loop in real time.
+          Once enabled, this tab lets you initiate a live CIBA request (approval is by email or push
+          depending on your PingOne / DaVinci setup) and watch the polling loop in real time.
         </p>
       </div>
     );
@@ -439,8 +441,9 @@ function TryItTab({ cibaStatus }) {
         Tokens are written to the <strong>BFF session</strong> — they are not returned to the browser.
       </p>
       <p className="ciba-section-desc">
-        Initiate a live CIBA request. A push notification will be sent to the
-        registered device for the user's email.
+        Initiate a live CIBA request. PingOne will deliver the approval step by <strong>email</strong> or{' '}
+        <strong>push</strong> depending on how you configured DaVinci — this app only sends{' '}
+        <code>login_hint</code> and <code>binding_message</code>.
       </p>
 
       {/* Form */}
@@ -466,7 +469,7 @@ function TryItTab({ cibaStatus }) {
             />
           </label>
           <label className="ciba-label">
-            Binding message (shown on phone)
+            Binding message (shown in email or on device push)
             <input
               className="ciba-input"
               value={message}
@@ -486,7 +489,7 @@ function TryItTab({ cibaStatus }) {
             <div className="ciba-notice ciba-notice--error">{errorMsg}</div>
           )}
           <button className="ciba-btn ciba-btn--primary" onClick={initiate}>
-            📲 Send Push Notification
+            📲 Start CIBA request
           </button>
         </div>
       ) : (
@@ -500,7 +503,7 @@ function TryItTab({ cibaStatus }) {
 
           {status === 'pending' && (
             <div className="ciba-notice ciba-notice--info">
-              Check the user's registered device for a push notification.<br />
+              Complete approval where PingOne sent it — <strong>email inbox</strong> or <strong>device push</strong> (your PingOne setup).<br />
               This panel polls <code>/api/auth/ciba/poll/{authReqId?.slice(0,12)}…</code> every 5 seconds.
             </div>
           )}
@@ -556,10 +559,22 @@ export default function CIBAPanel() {
     { id: 'roles',     label: 'Sign-in & roles' },
     { id: 'fullstack', label: 'Full stack' },
     { id: 'tokenx',    label: 'Token exchange' },
+    { id: 'vslogin',   label: 'vs Login Flow' },
     { id: 'tryit',     label: '▶ Try It' },
     { id: 'appflow',   label: 'App Flows' },
     { id: 'setup',     label: 'PingOne Setup' },
   ];
+
+  useEffect(() => {
+    const valid = new Set(['what', 'roles', 'fullstack', 'tokenx', 'vslogin', 'tryit', 'appflow', 'setup']);
+    const onEdu = (e) => {
+      setOpen(true);
+      const t = e.detail?.tab;
+      setActiveTab(valid.has(t) ? t : 'what');
+    };
+    window.addEventListener('education-open-ciba', onEdu);
+    return () => window.removeEventListener('education-open-ciba', onEdu);
+  }, []);
 
   return (
     <>
@@ -663,6 +678,33 @@ export default function CIBAPanel() {
             </div>
           )}
 
+          {activeTab === 'vslogin' && (
+            <div className="ciba-tab-content">
+              <h3 className="ciba-section-title">CIBA vs Authorization Code (login flow)</h3>
+              <div className="ciba-cards" style={{ marginBottom: '1rem' }}>
+                <div className="ciba-card">
+                  <div className="ciba-card-icon">📲</div>
+                  <div>
+                    <strong>CIBA</strong><br />
+                    No browser redirect to PingOne for the approval step. User gets out-of-band approval (email or push per your PingOne config); server polls{' '}
+                    <code>POST /token</code> with <code>grant_type=ciba</code>. Good for agents and step-up without breaking chat.
+                  </div>
+                </div>
+                <div className="ciba-card">
+                  <div className="ciba-card-icon">🔐</div>
+                  <div>
+                    <strong>Authorization Code + PKCE</strong><br />
+                    Full browser redirect to PingOne login page, then redirect back with <code>code</code>. Immediate session establishment;
+                    standard for SPAs with BFF. See <strong>Learn → Login Flow</strong> in the top bar.
+                  </div>
+                </div>
+              </div>
+              <p className="ciba-section-desc">
+                Both are OAuth-family flows at PingOne; this app can use CIBA when enabled for high-value actions and uses Authorization Code for sign-in.
+              </p>
+            </div>
+          )}
+
           {/* ── Sign-in, admin vs customer, banking agent ── */}
           {activeTab === 'roles' && (
             <div className="ciba-tab-content">
@@ -714,8 +756,8 @@ export default function CIBAPanel() {
             <div className="ciba-tab-content">
               <p className="ciba-section-desc">
                 CIBA decouples the <strong>consumption device</strong> (where the app runs) from
-                the <strong>authentication device</strong> (the user's phone). No browser redirect.
-                No popup. The user gets a push notification and taps Approve.
+                where the user <strong>approves</strong> (often another device or their email). No browser redirect.
+                No popup. PingOne delivers the approval step by <strong>email</strong> or <strong>push</strong> depending on your DaVinci configuration.
               </p>
 
               <h3 className="ciba-section-title">The flow</h3>
@@ -735,7 +777,7 @@ export default function CIBAPanel() {
                   <div className="ciba-card-icon">📩</div>
                   <div>
                     <strong>binding_message</strong><br />
-                    The text shown on the push notification — e.g. "Approve $500 transfer".
+                    The text shown in the approval email or push — e.g. "Approve $500 transfer".
                     Helps the user know exactly what they're approving.
                   </div>
                 </div>
@@ -785,7 +827,7 @@ export default function CIBAPanel() {
                 <div className="ciba-endpoint-row">
                   <span className="ciba-method ciba-method--post">POST</span>
                   <code>/api/auth/ciba/initiate</code>
-                  <span className="ciba-endpoint-desc">Trigger a push notification for the current user</span>
+                  <span className="ciba-endpoint-desc">Start CIBA (PingOne delivers approval by email or push)</span>
                 </div>
                 <div className="ciba-endpoint-row">
                   <span className="ciba-method ciba-method--get">GET</span>
@@ -805,7 +847,7 @@ export default function CIBAPanel() {
                 <div className="ciba-endpoint-row">
                   <span className="ciba-method ciba-method--post">POST</span>
                   <code>/api/auth/ciba/notify</code>
-                  <span className="ciba-endpoint-desc">Ping-mode callback from PingOne (user approved on phone)</span>
+                  <span className="ciba-endpoint-desc">Ping-mode callback from PingOne (user approved out-of-band)</span>
                 </div>
               </div>
             </div>
@@ -837,9 +879,9 @@ CIBA_POLL_INTERVAL_MS=5000
 CIBA_AUTH_REQUEST_EXPIRY=300`}</CodeBlock>
 
               <div className="ciba-notice ciba-notice--info" style={{ marginTop: '1rem' }}>
-                <strong>Azure AD users?</strong> If PingOne federates to Azure AD, users
-                already have Microsoft Authenticator registered. No extra device setup needed —
-                PingOne handles the Azure AD lookup via <code>login_hint</code> (email).
+                <strong>Azure AD users?</strong> If PingOne federates to Azure AD, <code>login_hint</code> (email)
+                still resolves the user. For <strong>email-only</strong> CIBA, no extra device is required. For a{' '}
+                <strong>push</strong> path, users may already have Microsoft Authenticator via Azure AD — depends on your IdP and DaVinci flow.
               </div>
             </div>
           )}

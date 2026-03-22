@@ -31,8 +31,17 @@
 
 .mcp-inspector__header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+  justify-content: flex-end;
+}
+
+.mcp-inspector__edu-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
 }
 
 .mcp-inspector__link {

@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import axios from 'axios';
 import apiClient from '../services/apiClient';
+import { useEducationUI } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
 import BankingAgent from './BankingAgent';
 
 const Dashboard = ({ user, onLogout }) => {
+  const { open } = useEducationUI();
   const [stats, setStats] = useState(null);
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -193,7 +196,39 @@ const Dashboard = ({ user, onLogout }) => {
             </p>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => open(EDU.LOGIN_FLOW, 'what')}
+            style={{
+              background: 'rgba(255,255,255,0.95)',
+              border: '1px solid rgba(255,255,255,0.85)',
+              color: '#1e40af',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+            }}
+          >
+            How does login work?
+          </button>
+          <button
+            type="button"
+            onClick={() => open(EDU.MAY_ACT, 'what')}
+            style={{
+              background: 'rgba(255,255,255,0.95)',
+              border: '1px solid rgba(255,255,255,0.85)',
+              color: '#1e40af',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+            }}
+          >
+            What is may_act?
+          </button>
           <Link
             to="/mcp-inspector"
             title="MCP discovery, tools/list & tools/call via BFF"
@@ -562,8 +597,44 @@ const Dashboard = ({ user, onLogout }) => {
                         fontSize: '1.1rem',
                         fontWeight: '600',
                         color: '#2c3e50',
-                        borderBottom: '1px solid #e1e5e9'
-                      }}>Access Token Payload</h4>
+                        borderBottom: '1px solid #e1e5e9',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        gap: '8px',
+                      }}>
+                        Access Token Payload
+                        <button
+                          type="button"
+                          title="may_act / act claims"
+                          onClick={() => open(EDU.MAY_ACT, 'lifecycle')}
+                          style={{
+                            border: 'none',
+                            background: '#e0e7ff',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                            padding: '2px 6px',
+                          }}
+                        >
+                          ⓘ may_act / act
+                        </button>
+                        <button
+                          type="button"
+                          title="scope claim"
+                          onClick={() => open(EDU.LOGIN_FLOW, 'tokens')}
+                          style={{
+                            border: 'none',
+                            background: '#e0e7ff',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                            padding: '2px 6px',
+                          }}
+                        >
+                          ⓘ scope
+                        </button>
+                      </h4>
                       <div style={{ padding: '20px' }}>
                         <pre style={{
                           background: '#f8f9fa',

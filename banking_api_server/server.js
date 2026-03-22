@@ -26,6 +26,7 @@ const adminConfigRoutes = require('./routes/adminConfig');
 const cibaRoutes        = require('./routes/ciba');
 const mcpInspectorRoutes = require('./routes/mcpInspector');
 const agentIdentityRoutes = require('./routes/agentIdentity');
+const bankingAgentNlRoutes = require('./routes/bankingAgentNl');
 const { getOAuthRedirectDebugInfo } = require('./services/oauthRedirectUris');
 
 // Import middleware
@@ -155,6 +156,7 @@ app.use('/api/auth/oauth', oauthRoutes);
 app.use('/api/auth/oauth/user', oauthUserRoutes);
 app.use('/api/auth/ciba', cibaRoutes);
 app.use('/api/agent', agentIdentityRoutes);
+app.use('/api/banking-agent', authenticateToken, bankingAgentNlRoutes);
 app.use('/api/mcp/inspector', authenticateToken, mcpInspectorRoutes);
 app.use('/api/users', authenticateToken, userRoutes);
 app.use('/api/accounts', authenticateToken, accountRoutes);

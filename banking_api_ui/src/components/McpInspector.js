@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../services/apiClient';
+import { useEducationUI } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
 import './McpInspector.css';
 
 /**
@@ -8,6 +10,7 @@ import './McpInspector.css';
  * Complements LangChain MCP Host JSON at REACT_APP_LANGCHAIN_INSPECTOR_URL (default :8081/inspector/mcp-host).
  */
 const McpInspector = ({ user, onLogout }) => {
+  const { open } = useEducationUI();
   const [context, setContext] = useState(null);
   const [tools, setTools] = useState([]);
   const [loadingTools, setLoadingTools] = useState(false);
@@ -93,6 +96,20 @@ const McpInspector = ({ user, onLogout }) => {
           </p>
         </div>
         <div className="mcp-inspector__header-actions">
+          <div className="mcp-inspector__edu-btns">
+            <button type="button" className="mcp-inspector__btn-ghost" onClick={() => open(EDU.MCP_PROTOCOL, 'what')}>
+              What is MCP?
+            </button>
+            <button type="button" className="mcp-inspector__btn-ghost" onClick={() => open(EDU.TOKEN_EXCHANGE, 'why')}>
+              Token exchange
+            </button>
+            <button type="button" className="mcp-inspector__btn-ghost" onClick={() => open(EDU.INTROSPECTION, 'why')}>
+              Introspection
+            </button>
+            <button type="button" className="mcp-inspector__btn-ghost" onClick={() => open(EDU.AGENT_GATEWAY, 'overview')}>
+              Agent Gateway
+            </button>
+          </div>
           <Link to={homePath} className="mcp-inspector__link">
             ← Dashboard
           </Link>
@@ -113,32 +130,9 @@ const McpInspector = ({ user, onLogout }) => {
       <section className="mcp-inspector__panel">
         <h2>How MCP tools work (this demo)</h2>
         <p className="mcp-inspector__muted mcp-inspector__mb">
-          <strong>Whole path in one glance:</strong> your browser talks only to the <strong>Banking API (BFF)</strong>. The BFF
-          holds your OAuth session. When you invoke a tool here, the BFF acts as an <strong>MCP client</strong>: it may{' '}
-          <strong>exchange</strong> your session token for a token scoped to the MCP server (RFC 8693), opens a channel to the{' '}
-          <strong>MCP server</strong>, sends <code>tools/call</code>, and the MCP server performs REST calls to the Banking API
-          with the right Bearer token and scopes. Tokens from PingOne are created during login — not in this panel.
-        </p>
-        <ol className="mcp-inspector__steps">
-          <li>
-            <strong>Discovery</strong> — Client asks the MCP server which tools exist (<code>tools/list</code> after{' '}
-            <code>initialize</code>).
-          </li>
-          <li>
-            <strong>Request</strong> — The AI (or this inspector) picks a tool and builds a structured JSON payload (
-            <code>tools/call</code>).
-          </li>
-          <li>
-            <strong>Execution</strong> — The MCP server runs the tool (e.g. REST to Banking API) and returns output to the
-            caller.
-          </li>
-        </ol>
-        <p className="mcp-inspector__note">
-          <strong>Backend protection (both hosts):</strong> Banking API is reached from MCP tool handlers with Bearer tokens,
-          scope checks, and PingOne introspection on the MCP server — not from raw browser calls. The <strong>BFF</strong> path
-          adds <strong>session-bound OAuth</strong> and optional <strong>RFC 8693 exchange</strong> before MCP; the{' '}
-          <strong>LangChain</strong> path uses <strong>agent OAuth</strong> (and CIBA where configured) as the MCP client
-          identity.
+          Use the buttons in the header for deep dives: <strong>MCP protocol</strong>, <strong>token exchange</strong>,{' '}
+          <strong>introspection</strong>, and <strong>Agent Gateway</strong>. Short version: the BFF holds your session and may
+          RFC 8693 exchange before <code>tools/call</code>; the MCP server calls the Banking API with Bearer tokens.
         </p>
       </section>
 

@@ -59,7 +59,7 @@ router.get('/status', (req, res) => {
     setupSteps: !cibaService.isEnabled() ? [
       'Set CIBA_ENABLED=true in your environment',
       'Enable the CIBA grant type on your PingOne application',
-      'Enable Push Notification in your PingOne MFA policy',
+      'Configure DaVinci: email-only CIBA needs no MFA push; push path needs MFA policy + registered device',
     ] : [],
   });
 });
@@ -71,7 +71,7 @@ router.get('/status', (req, res) => {
 /**
  * Body: {
  *   scope?:           'openid profile email banking:write'
- *   binding_message?: 'Approve $500 transfer'   — shown on phone notification
+ *   binding_message?: 'Approve $500 transfer'   — shown in email or push (PingOne / DaVinci)
  *   acr_values?:      'Multi_factor'             — for step-up auth
  *   login_hint?:      'user@example.com'         — override from session email
  * }

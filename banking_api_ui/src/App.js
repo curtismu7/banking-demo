@@ -17,6 +17,9 @@ import Config from './components/Config';
 import Onboarding from './components/Onboarding';
 import CIBAPanel from './components/CIBAPanel';
 import McpInspector from './components/McpInspector';
+import { EducationUIProvider } from './context/EducationUIContext';
+import EducationBar from './components/EducationBar';
+import EducationPanelsHost from './components/education/EducationPanelsHost';
 import './App.css';
 
 function App() {
@@ -155,38 +158,42 @@ function App() {
 
   return (
     <Router>
-      <div className="App">
-        <ToastContainer position="top-right" autoClose={4000} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
-        {/* Config page is always accessible, regardless of auth state */}
-        <Routes>
-          <Route path="/config" element={<Config />} />
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="*" element={
-            !user ? (
-              <>
-                <Login />
-                <BankingAgent user={null} />
-              </>
-            ) : (
-              <main className="main-content">
-                <Routes>
-                  <Route path="/" element={user?.role === 'admin' ? <Dashboard user={user} onLogout={logout} /> : <UserDashboard user={user} onLogout={logout} />} />
-                  <Route path="/admin" element={user?.role === 'admin' ? <Dashboard user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
-                  <Route path="/dashboard" element={<UserDashboard user={user} onLogout={logout} />} />
-                  <Route path="/activity" element={user?.role === 'admin' ? <ActivityLogs user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
-                  <Route path="/users" element={user?.role === 'admin' ? <Users user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
-                  <Route path="/accounts" element={user?.role === 'admin' ? <Accounts user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
-                  <Route path="/transactions" element={user?.role === 'admin' ? <Transactions user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
-                  <Route path="/settings" element={user?.role === 'admin' ? <SecuritySettings user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
-                  <Route path="/mcp-inspector" element={<McpInspector user={user} onLogout={logout} />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </main>
-            )
-          } />
-        </Routes>
-        <CIBAPanel />
-      </div>
+      <EducationUIProvider>
+        <div className="App">
+          <ToastContainer position="top-right" autoClose={4000} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
+          {/* Config page is always accessible, regardless of auth state */}
+          <Routes>
+            <Route path="/config" element={<Config />} />
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="*" element={
+              !user ? (
+                <>
+                  <Login />
+                  <BankingAgent user={null} />
+                </>
+              ) : (
+                <main className="main-content">
+                  <EducationBar />
+                  <Routes>
+                    <Route path="/" element={user?.role === 'admin' ? <Dashboard user={user} onLogout={logout} /> : <UserDashboard user={user} onLogout={logout} />} />
+                    <Route path="/admin" element={user?.role === 'admin' ? <Dashboard user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                    <Route path="/dashboard" element={<UserDashboard user={user} onLogout={logout} />} />
+                    <Route path="/activity" element={user?.role === 'admin' ? <ActivityLogs user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                    <Route path="/users" element={user?.role === 'admin' ? <Users user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                    <Route path="/accounts" element={user?.role === 'admin' ? <Accounts user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                    <Route path="/transactions" element={user?.role === 'admin' ? <Transactions user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                    <Route path="/settings" element={user?.role === 'admin' ? <SecuritySettings user={user} onLogout={logout} /> : <Navigate to="/" replace />} />
+                    <Route path="/mcp-inspector" element={<McpInspector user={user} onLogout={logout} />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </main>
+              )
+            } />
+          </Routes>
+          <EducationPanelsHost />
+          <CIBAPanel />
+        </div>
+      </EducationUIProvider>
     </Router>
   );
 }

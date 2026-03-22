@@ -4,10 +4,13 @@ import axios from 'axios';
 import { format } from 'date-fns';
 import apiClient from '../services/apiClient';
 import useChatWidget from '../hooks/useChatWidget';
+import { useEducationUI } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
 import BankingAgent from './BankingAgent';
 import './UserDashboard.css';
 
 const UserDashboard = ({ user: propUser, onLogout }) => {
+  const { open } = useEducationUI();
   const [user, setUser] = useState(propUser);
   const [accounts, setAccounts] = useState([]);
   const [showTokenModal, setShowTokenModal] = useState(false);
@@ -414,6 +417,20 @@ const UserDashboard = ({ user: propUser, onLogout }) => {
             <span className="user-email">{user?.email}</span>
           </div>
           <div className="header-actions">
+            <button
+              type="button"
+              className="dashboard-edu-btn"
+              onClick={() => open(EDU.LOGIN_FLOW, 'what')}
+            >
+              How does login work?
+            </button>
+            <button
+              type="button"
+              className="dashboard-edu-btn"
+              onClick={() => open(EDU.MAY_ACT, 'what')}
+            >
+              What is may_act?
+            </button>
             <Link
               to="/mcp-inspector"
               className="dashboard-header-mcp-btn"
@@ -752,7 +769,11 @@ const UserDashboard = ({ user: propUser, onLogout }) => {
 
                   {tokenData.accessToken && (
                     <div className="token-section">
-                      <h4>Access Token Payload</h4>
+                      <h4 className="token-payload-heading">
+                        Access Token Payload
+                        <button type="button" className="token-payload-hint" title="may_act / act" onClick={() => open(EDU.MAY_ACT, 'lifecycle')}>ⓘ</button>
+                        <button type="button" className="token-payload-hint" title="scope" onClick={() => open(EDU.LOGIN_FLOW, 'tokens')}>ⓘ</button>
+                      </h4>
                       <pre className="token-json">
                         {JSON.stringify(tokenData.accessToken.payload, null, 2)}
                       </pre>

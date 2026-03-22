@@ -547,7 +547,8 @@ export class AuthenticationIntegration {
       auth_req_id,
       expires_in: expires_in || 300,
       poll_interval: pollInterval,
-      message: '📱 A push notification has been sent to your registered device. Please tap **Approve** to continue.',
+      message:
+        '📬 Complete CIBA approval where PingOne sent it — **email** or **device push** (your PingOne / DaVinci setup). Then this session can continue.',
     };
   }
 

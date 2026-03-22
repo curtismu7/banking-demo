@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import apiClient from '../services/apiClient';
+import { useEducationUI } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +118,7 @@ function MultiSelect({ value = [], options, onChange, disabled }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 const SecuritySettings = ({ user }) => {
+  const { open } = useEducationUI();
   const [settings, setSettings] = useState(null);
   const [form, setForm] = useState(null);
   const [history, setHistory] = useState([]);
@@ -204,12 +207,28 @@ const SecuritySettings = ({ user }) => {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => window.location.href = '/admin'}
-          style={{ background: 'rgba(255,255,255,0.2)', border: '2px solid rgba(255,255,255,0.3)', color: 'white', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '500' }}
-        >
-          ← Admin Dashboard
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => open(EDU.STEP_UP, 'what')}
+            style={{ background: 'rgba(255,255,255,0.95)', border: '1px solid rgba(255,255,255,0.85)', color: '#1e40af', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+          >
+            What is step-up MFA?
+          </button>
+          <button
+            type="button"
+            onClick={() => open(EDU.PINGONE_AUTHORIZE, 'what')}
+            style={{ background: 'rgba(255,255,255,0.95)', border: '1px solid rgba(255,255,255,0.85)', color: '#1e40af', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
+          >
+            What is PingOne Authorize?
+          </button>
+          <button
+            onClick={() => window.location.href = '/admin'}
+            style={{ background: 'rgba(255,255,255,0.2)', border: '2px solid rgba(255,255,255,0.3)', color: 'white', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.875rem', fontWeight: '500' }}
+          >
+            ← Admin Dashboard
+          </button>
+        </div>
       </div>
 
       {/* Alert messages */}

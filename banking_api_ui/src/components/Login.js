@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
+import { useEducationUIOptional } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
 
 const Login = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const edu = useEducationUIOptional();
 
   const handleOAuthLogin = () => {
     // OAuth redirect_uri to PingOne is computed on the server (must match PingOne app allowlist).
@@ -112,12 +114,29 @@ const Login = () => {
             </div>
           </div>
 
-          <details className="login-education-details" style={{ marginTop: '1rem', fontSize: '0.85rem', color: '#4b5563', lineHeight: 1.5 }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#1f2937' }}>Admin vs customer vs Banking Agent</summary>
-            <p style={{ margin: '0.75rem 0 0.5rem 0' }}>
-              <strong>Admin</strong> and <strong>Customer</strong> are two separate OAuth flows (two PingOne apps or one app with two callbacks). The <strong>Banking Agent</strong> panel is not another identity: once you are signed in, it runs MCP tools with <em>your</em> session. More detail: open the floating <strong>CIBA guide</strong> → <strong>Sign-in &amp; roles</strong> tab, or <Link to="/onboarding">setup checklist</Link>.
-            </p>
-          </details>
+          <div className="login-education-actions" style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem' }}
+              onClick={() => edu?.open(EDU.LOGIN_FLOW, 'what')}
+            >
+              How does this login work?
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem' }}
+              onClick={() => { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('education-open-ciba', { detail: { tab: 'what' } })); }}
+            >
+              What is CIBA?
+            </button>
+            <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+              <Link to="/onboarding">Setup checklist</Link>
+              {' · '}
+              <span>Admin vs customer: use the Learn bar after sign-in, or the CIBA guide (floating).</span>
+            </span>
+          </div>
 
           <p className="login-onboarding-hint" style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.9rem' }}>
             <Link to="/onboarding" style={{ color: '#2563eb', fontWeight: 500 }}>

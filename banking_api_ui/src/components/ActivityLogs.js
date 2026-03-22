@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import apiClient from '../services/apiClient';
+import { useEducationUI } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
 
 const ActivityLogs = ({ user, onLogout }) => {
+  const { open } = useEducationUI();
   const [logs, setLogs] = useState([]);
   const [pagination, setPagination] = useState({});
   const [loading, setLoading] = useState(true);
@@ -184,9 +187,17 @@ const ActivityLogs = ({ user, onLogout }) => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h1 style={{ color: '#1e293b' }}>Activity Logs</h1>
-        <div style={{ display: 'flex', gap: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <h1 style={{ color: '#1e293b', margin: 0 }}>Activity Logs</h1>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ fontSize: '0.85rem' }}
+            onClick={() => open(EDU.INTROSPECTION, 'why')}
+          >
+            How are audit logs created?
+          </button>
           <button onClick={exportLogs} className="btn btn-secondary">
             Export CSV
           </button>

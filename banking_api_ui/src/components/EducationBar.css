@@ -1,0 +1,71 @@
+.edu-bar {
+  width: 100%;
+  background: linear-gradient(to bottom, #f8fafc 0%, #f1f5f9 100%);
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.5rem 0.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.edu-bar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.edu-bar-group {
+  position: relative;
+}
+
+.edu-bar-button {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid #6c8ebf;
+  background: white;
+  font-size: 12px;
+  cursor: pointer;
+  color: #333;
+}
+
+.edu-bar-button:hover {
+  background: #dae8fc;
+}
+
+.edu-bar-button.dropdown {
+  padding-right: 8px;
+}
+
+.edu-bar-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  min-width: 220px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+}
+
+.edu-bar-dropdown button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.5rem 0.65rem;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 0.35rem;
+  color: #0f172a;
+}
+
+.edu-bar-dropdown button:hover {
+  background: #eff6ff;
+}

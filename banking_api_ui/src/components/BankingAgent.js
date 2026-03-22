@@ -9,6 +9,10 @@ import {
   createWithdrawal,
 } from '../services/bankingAgentService';
 import { loadPublicConfig } from '../services/configService';
+import { useEducationUIOptional } from '../context/EducationUIContext';
+import { EDU } from './education/educationIds';
+import { EDUCATION_COMMANDS } from './education/educationCommands';
+import { fetchNlStatus, parseNaturalLanguage } from '../services/bankingAgentNlService';
 import './BankingAgent.css';
 
 // ─── Action definitions ────────────────────────────────────────────────────────
@@ -122,8 +126,21 @@ function handleLoginAction(actionId) {
   }
 }
 
+function normalizeBankingParams(action, params) {
+  const p = { ...(params || {}) };
+  if (p.account_id && !p.accountId) p.accountId = p.account_id;
+  if (p.from_account_id && !p.fromId) p.fromId = p.from_account_id;
+  if (p.to_account_id && !p.toId) p.toId = p.to_account_id;
+  return p;
+}
+
 export default function BankingAgent({ user }) {
+  const edu = useEducationUIOptional();
   const [isOpen, setIsOpen] = useState(false);
+  const [showLearn, setShowLearn] = useState(false);
+  const [nlInput, setNlInput] = useState('');
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlMeta, setNlMeta] = useState(null);
   const [activeAction, setActiveAction] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -154,14 +171,25 @@ export default function BankingAgent({ user }) {
     if (isOpen) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !isLoggedIn) return;
+    fetchNlStatus().then(setNlMeta).catch(() => setNlMeta({ geminiConfigured: false }));
+  }, [isOpen, isLoggedIn]);
+
   function addMessage(role, content, tool) {
     setMessages(prev => [...prev, { id: Date.now().toString(), role, content, tool }]);
   }
 
-  async function runAction(actionId, form) {
+  /**
+   * Runs a banking tool. When fromNl is true, skips the extra user bubble (NL already echoed the ask).
+   */
+  async function runAction(actionId, form, opts = {}) {
+    const { skipUserLabel = false } = opts;
     setActiveAction(null);
-    const label = ACTIONS.find(a => a.id === actionId)?.label || actionId;
-    addMessage('user', label);
+    if (!skipUserLabel) {
+      const label = ACTIONS.find(a => a.id === actionId)?.label || actionId;
+      addMessage('user', label);
+    }
     setLoading(true);
 
     try {
@@ -218,6 +246,55 @@ export default function BankingAgent({ user }) {
     }
   }
 
+  function openEducationCommand(cmd) {
+    if (cmd.ciba && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('education-open-ciba', { detail: { tab: cmd.tab || 'what' } }));
+      return;
+    }
+    if (cmd.panel) edu?.open(cmd.panel, cmd.tab || null);
+  }
+
+  async function handleNaturalLanguage() {
+    const text = nlInput.trim();
+    if (!text || !isLoggedIn) return;
+    setNlLoading(true);
+    addMessage('user', text);
+    setNlInput('');
+    try {
+      const { source, result } = await parseNaturalLanguage(text);
+      if (result.kind === 'education' && result.ciba) {
+        openEducationCommand({ ciba: true, tab: result.tab });
+        addMessage('assistant', `Opened CIBA guide (${source}).`);
+        return;
+      }
+      if (result.kind === 'education' && result.education?.panel) {
+        edu?.open(result.education.panel, result.education.tab || null);
+        addMessage('assistant', `Opened help: ${result.education.panel} (${source}).`);
+        return;
+      }
+      if (result.kind === 'banking' && result.banking?.action) {
+        const { action, params } = result.banking;
+        const p = normalizeBankingParams(action, params);
+        if (action === 'accounts' || action === 'transactions') {
+          await runAction(action, {}, { skipUserLabel: true });
+        } else if (action === 'balance' && p.accountId) {
+          await runAction('balance', { accountId: p.accountId }, { skipUserLabel: true });
+        } else if (['balance', 'transfer', 'deposit', 'withdraw'].includes(action)) {
+          setActiveAction(action);
+          addMessage('assistant', `Open the form below to complete **${action}** (${source}).`);
+        } else {
+          await runAction(action, p, { skipUserLabel: true });
+        }
+        return;
+      }
+      addMessage('assistant', result.message || 'Try a banking action or a topic like “token exchange”.');
+    } catch (err) {
+      addMessage('assistant', `Could not parse: ${err.message}`);
+    } finally {
+      setNlLoading(false);
+    }
+  }
+
   return (
     <>
       {/* FAB */}
@@ -253,34 +330,30 @@ export default function BankingAgent({ user }) {
               <div className="banking-agent-welcome">
                 <p>
                   {isLoggedIn
-                    ? 'Select an action below. Calls go from this app to the Banking API; the MCP server runs banking tools and talks to the same API with scoped tokens.'
+                    ? 'Use **Learn topics** or **Ask in plain language**, or pick a banking action. Calls go through the Banking API; the MCP server runs tools with scoped tokens.'
                     : oauthConfig === null
                       ? 'Welcome to PingOne AI Core. Checking configuration…'
                       : isConfigured
                         ? 'PingOne AI Core is configured. Sign in to get started.'
                         : 'Set up your PingOne credentials to get started.'}
                 </p>
-                <details className="banking-agent-learn">
-                  <summary>How OAuth, API &amp; MCP work together</summary>
-                  <ol>
-                    <li><strong>Sign in</strong> — Your browser follows PingOne OAuth (PKCE). Tokens are created at PingOne and stored in the Banking API session, not in localStorage.</li>
-                    <li><strong>REST calls</strong> — Buttons below use <code>/api/…</code> routes; the server uses your session to know who you are.</li>
-                    <li><strong>MCP</strong> — The MCP server exposes tools (accounts, transfers). The Banking API can call it via WebSocket; tools may use a delegated token (RFC 8693 exchange) scoped for the MCP audience.</li>
-                    <li><strong>Token exchange</strong> — Before each MCP hop, the BFF may call PingOne <code>POST /as/token</code> with <code>grant_type=token-exchange</code> (subject token from your session; optional actor token for &quot;on behalf of&quot;). See <strong>CIBA guide → Token exchange</strong> for before/after, HTTP status, and JSON responses.</li>
-                    <li><strong>CIBA</strong> — Optional push approval without a full redirect (see the <strong>CIBA guide</strong> button).</li>
-                  </ol>
-                  <p className="banking-agent-learn-hint">Open <strong>CIBA guide → Full stack</strong> for the diagram; <strong>Token exchange</strong> for RFC 8693 details; <strong>Application Configuration</strong> has an MCP Inspector setup wizard.</p>
-                </details>
-                <details className="banking-agent-learn">
-                  <summary>Admin login vs Customer login vs this Agent</summary>
-                  <p className="banking-agent-learn-hint" style={{ marginTop: '0.5rem' }}>
-                    <strong>Admin</strong> and <strong>Customer</strong> on the login page are two different PingOne OAuth apps. Admin goes to <code>/admin</code> (tenant-wide tools). Customer goes to <code>/dashboard</code> (personal accounts).
-                  </p>
-                  <p className="banking-agent-learn-hint">
-                    <strong>This panel</strong> is not a separate login. After you sign in, actions here call <code>POST /api/mcp/tool</code> using <strong>your current session</strong> — same identity as the rest of the app. We know who you are from the server session cookie, not from a different &quot;agent user.&quot;
-                  </p>
-                  <p className="banking-agent-learn-hint">Full comparison: <strong>CIBA guide → Sign-in &amp; roles</strong>.</p>
-                </details>
+                <div className="banking-agent-learn">
+                  <button
+                    type="button"
+                    className="banking-agent-learn-btn"
+                    onClick={() => edu?.open(EDU.MCP_PROTOCOL, 'auth')}
+                  >
+                    How OAuth + MCP work together
+                  </button>
+                  <button
+                    type="button"
+                    className="banking-agent-learn-btn"
+                    onClick={() => edu?.open(EDU.TOKEN_EXCHANGE, 'why')}
+                  >
+                    Token exchange explained
+                  </button>
+                  <p className="banking-agent-learn-hint">After sign-in, use the top <strong>Learn</strong> bar for more topics. CIBA guide (floating) has Sign-in &amp; roles.</p>
+                </div>
               </div>
             )}
             {messages.map(msg => (
@@ -302,6 +375,67 @@ export default function BankingAgent({ user }) {
             )}
             <div ref={bottomRef} />
           </div>
+
+          {/* Learn topic chips + plain-language (signed-in only) */}
+          {isLoggedIn && !activeAction && (
+            <div className="banking-agent-ctrl">
+              <button
+                type="button"
+                className="banking-agent-learn-toggle"
+                onClick={() => setShowLearn((s) => !s)}
+                aria-expanded={showLearn}
+              >
+                {showLearn ? '▼' : '▶'} Learn topics ({EDUCATION_COMMANDS.length})
+              </button>
+              {showLearn && (
+                <div className="banking-agent-learn-grid" role="group" aria-label="Learn topics">
+                  {EDUCATION_COMMANDS.map((cmd) => (
+                    <button
+                      key={cmd.id}
+                      type="button"
+                      className="banking-agent-learn-chip"
+                      onClick={() => openEducationCommand(cmd)}
+                    >
+                      {cmd.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="banking-agent-nl">
+                <label className="banking-agent-nl-label" htmlFor="banking-agent-nl-input">
+                  Ask in plain language
+                </label>
+                <textarea
+                  id="banking-agent-nl-input"
+                  className="banking-agent-nl-input"
+                  rows={2}
+                  value={nlInput}
+                  onChange={(e) => setNlInput(e.target.value)}
+                  placeholder="Examples: show my accounts · what is token exchange · explain CIBA"
+                  disabled={nlLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleNaturalLanguage();
+                    }
+                  }}
+                />
+                <div className="banking-agent-nl-row">
+                  <button
+                    type="button"
+                    className="banking-agent-nl-send"
+                    onClick={handleNaturalLanguage}
+                    disabled={nlLoading || !nlInput.trim()}
+                  >
+                    {nlLoading ? '…' : 'Send'}
+                  </button>
+                  <span className="banking-agent-nl-meta" title="Heuristic is always free. Gemini uses GOOGLE_AI_API_KEY or GEMINI_API_KEY on the API server.">
+                    {nlMeta?.geminiConfigured ? 'NL: Gemini (server)' : 'NL: heuristic (free, offline)'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Action form (when user selects a transaction action) */}
           {activeAction && (

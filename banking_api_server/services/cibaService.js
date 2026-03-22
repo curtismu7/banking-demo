@@ -6,7 +6,7 @@
  * Client-Initiated Backchannel Authentication (CIBA) — OIDC CIBA Core 1.0
  *
  * Provides server-to-server backchannel auth with PingOne so that users can
- * approve actions via a push notification (Microsoft Authenticator / PingID)
+ * approve out-of-band (email link or device push — configured in PingOne / DaVinci)
  * without any browser redirect.
  *
  * Exported functions:
@@ -61,7 +61,7 @@ function _generateNotificationToken() {
  * Initiate a CIBA authentication request.
  *
  * @param {string} loginHint    User's email address or sub
- * @param {string} bindingMessage  Short string shown on the push notification
+ * @param {string} bindingMessage  Short string shown in the approval email or push (PingOne)
  * @param {string} scope        Space-separated OAuth scopes
  * @param {string} [acrValues]  ACR values for step-up (e.g. 'Multi_factor')
  * @returns {Promise<{ auth_req_id: string, expires_in: number, interval: number }>}
