@@ -24,6 +24,16 @@ router.get('/login', (req, res) => {
       return res.redirect(`${getFrontendOrigin(req)}/config?error=not_configured`);
     }
 
+    // Drop a prior end-user OAuth session so Admin sign-in does not reuse customer tokens/role.
+    const isEndUserSession =
+      req.session?.oauthType === 'user' || req.session?.user?.role === 'customer';
+    if (isEndUserSession) {
+      delete req.session.oauthTokens;
+      delete req.session.user;
+      delete req.session.clientType;
+      delete req.session.oauthType;
+    }
+
     // Generate state parameter for CSRF protection
     const state = oauthService.generateState();
 
@@ -94,8 +104,10 @@ router.get('/callback', async (req, res) => {
       oauthUser.role = 'admin'; // Make OAuth users admin by default
     } else {
       console.log('Found existing user:', user.username, 'with role:', user.role);
-      // Preserve the existing role (especially admin role)
-      oauthUser.role = user.role;
+      // This flow is the Admin PingOne app only — always grant admin in the demo store so
+      // users who previously signed in as Customer can switch to Admin without staying "customer".
+      // Do not downgrade an existing admin.
+      oauthUser.role = 'admin';
     }
     
     if (!user) {

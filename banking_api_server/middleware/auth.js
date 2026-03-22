@@ -566,7 +566,12 @@ const authenticateToken = async (req, res, next) => {
           const adminClientId = process.env.PINGONE_ADMIN_CLIENT_ID || process.env.VITE_PINGONE_CLIENT_ID;
           const tokenClientId = decoded.azp || decoded.client_id;
           const isAdminClient = adminClientId && tokenClientId && tokenClientId === adminClientId;
-          const sessionRole = req.session?.user?.id === decoded.sub ? req.session.user.role : null;
+          const su = req.session?.user;
+          const sessionMatchesSub = su && (
+            su.oauthId === decoded.sub ||
+            su.id === decoded.sub
+          );
+          const sessionRole = sessionMatchesSub ? su.role : null;
           const derivedRole = (isAdminClient || sessionRole === 'admin') ? 'admin' : 'user';
           req.user = {
             id: decoded.sub,
@@ -659,7 +664,12 @@ const authenticateToken = async (req, res, next) => {
       const adminClientId = process.env.PINGONE_ADMIN_CLIENT_ID || process.env.VITE_PINGONE_CLIENT_ID;
       const tokenClientId = decoded.azp || decoded.client_id;
       const isAdminClient = adminClientId && tokenClientId && tokenClientId === adminClientId;
-      const sessionRole = req.session?.user?.id === decoded.sub ? req.session.user.role : null;
+      const su = req.session?.user;
+      const sessionMatchesSub = su && (
+        su.oauthId === decoded.sub ||
+        su.id === decoded.sub
+      );
+      const sessionRole = sessionMatchesSub ? su.role : null;
       const derivedRole = (isAdminClient || sessionRole === 'admin') ? 'admin' : 'user';
       req.user = {
         id: decoded.sub,
