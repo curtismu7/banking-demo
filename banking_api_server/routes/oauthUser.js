@@ -5,39 +5,7 @@ const configStore = require('../services/configStore');
 const dataStore = require('../data/store');
 const { determineClientType } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
-const { getCanonicalPublicOrigin } = require('../services/vercelPublicUrl');
-
-/**
- * Derive the frontend origin for redirect URLs.
- * See routes/oauth.js getOrigin — same rules (PingOne-safe canonical URL on Vercel).
- */
-function getOrigin(req) {
-  const fromStore = configStore.getEffective('frontend_url');
-  if (fromStore) return fromStore.replace(/\/+$/, '');
-  const canonical = getCanonicalPublicOrigin();
-  if (canonical) return canonical;
-  if (process.env.VERCEL) {
-    return `${req.protocol}://${req.get('host')}`;
-  }
-  return (process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000').replace(/\/+$/, '');
-}
-
-/**
- * OAuth redirect URI for end-user flow (must match PingOne exactly).
- */
-function getRedirectUri(req) {
-  const fromStore = configStore.getEffective('user_redirect_uri');
-  if (fromStore) return fromStore;
-  const base = getCanonicalPublicOrigin();
-  if (base) return `${base}/api/auth/oauth/user/callback`;
-  if (process.env.VERCEL) {
-    console.warn(
-      '[OAuth user] No canonical public URL; using request host for redirect_uri — set PUBLIC_APP_URL or REACT_APP_CLIENT_URL or enable VERCEL_PROJECT_PRODUCTION_URL.'
-    );
-    return `${req.protocol}://${req.get('host')}/api/auth/oauth/user/callback`;
-  }
-  return 'http://localhost:3001/api/auth/oauth/user/callback';
-}
+const { getFrontendOrigin, getUserRedirectUri } = require('../services/oauthRedirectUris');
 
 /**
  * Create sample accounts and transactions for new customers
@@ -146,12 +114,12 @@ router.get('/login', (req, res) => {
   try {
     // Guard: end-user flow needs user client + env (not admin_client_id)
     if (!configStore.isUserOAuthConfigured()) {
-      return res.redirect(`${getOrigin(req)}/config?error=not_configured`);
+      return res.redirect(`${getFrontendOrigin(req)}/config?error=not_configured`);
     }
 
     const state = oauthService.generateState();
     const codeVerifier = oauthService.generateCodeVerifier();
-    const redirectUri = getRedirectUri(req);
+    const redirectUri = getUserRedirectUri(req);
     const url = oauthService.generateAuthorizationUrl(state, codeVerifier, {}, redirectUri);
 
     // Store state, verifier and redirect URI in session for CSRF protection and PKCE
@@ -164,7 +132,7 @@ router.get('/login', (req, res) => {
     res.redirect(url);
   } catch (error) {
     console.error('OAuth login error:', error);
-    res.redirect(`${getOrigin(req)}/login?error=oauth_init_failed`);
+    res.redirect(`${getFrontendOrigin(req)}/login?error=oauth_init_failed`);
   }
 });
 
@@ -178,19 +146,19 @@ router.get('/callback', async (req, res) => {
     // Check for OAuth errors
     if (error) {
       console.error('OAuth error:', error);
-      return res.redirect(`${getOrigin(req)}/login?error=oauth_error`);
+      return res.redirect(`${getFrontendOrigin(req)}/login?error=oauth_error`);
     }
     
     // Validate state parameter
     if (!state || state !== req.session.oauthState) {
       console.error('Invalid state parameter');
-      return res.redirect(`${getOrigin(req)}/login?error=invalid_state`);
+      return res.redirect(`${getFrontendOrigin(req)}/login?error=invalid_state`);
     }
     
     // Validate code parameter
     if (!code) {
       console.error('No authorization code received');
-      return res.redirect(`${getOrigin(req)}/login?error=no_code`);
+      return res.redirect(`${getFrontendOrigin(req)}/login?error=no_code`);
     }
     
     // Retrieve and clear the PKCE code verifier and redirect URI from session
@@ -293,7 +261,7 @@ router.get('/callback', async (req, res) => {
     // Determine client type from the original OAuth token
     const clientType = determineClientType(tokenData.access_token);
     const authedUser = user;
-    const origin = getOrigin(req);
+    const origin = getFrontendOrigin(req);
     // Preserve step-up return destination across session regeneration
     const stepUpReturnTo = req.session.stepUpReturnTo || null;
 
@@ -336,7 +304,7 @@ router.get('/callback', async (req, res) => {
     
   } catch (error) {
     console.error('OAuth callback error:', error);
-    res.redirect(`${getOrigin(req)}/login?error=callback_failed`);
+    res.redirect(`${getFrontendOrigin(req)}/login?error=callback_failed`);
   }
 });
 
@@ -358,7 +326,7 @@ router.get('/stepup', (req, res) => {
 
     const state = oauthService.generateState();
     const codeVerifier = oauthService.generateCodeVerifier();
-    const redirectUri = getRedirectUri(req);
+    const redirectUri = getUserRedirectUri(req);
     const url = oauthService.generateAuthorizationUrl(state, codeVerifier, { acr_values: acrValue }, redirectUri);
 
     // Persist PKCE + state + redirect URI + where to go after MFA
@@ -372,13 +340,13 @@ router.get('/stepup', (req, res) => {
     req.session.save((err) => {
       if (err) {
         console.error('[StepUp] Session save error:', err);
-        return res.redirect(`${getOrigin(req)}/dashboard?error=stepup_init_failed`);
+        return res.redirect(`${getFrontendOrigin(req)}/dashboard?error=stepup_init_failed`);
       }
       res.redirect(url);
     });
   } catch (error) {
     console.error('[StepUp] Error initiating step-up:', error);
-    res.redirect(`${getOrigin(req)}/dashboard?error=stepup_init_failed`);
+    res.redirect(`${getFrontendOrigin(req)}/dashboard?error=stepup_init_failed`);
   }
 });
 
@@ -411,7 +379,7 @@ router.get('/status', (req, res) => {
  */
 router.get('/logout', (req, res) => {
   const idToken = req.session.oauthTokens?.idToken || null;
-  const postLogoutUri = `${getOrigin(req)}/login`;
+  const postLogoutUri = `${getFrontendOrigin(req)}/login`;
 
   req.session.destroy((err) => {
     if (err) {

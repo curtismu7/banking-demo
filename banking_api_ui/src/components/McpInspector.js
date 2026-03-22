@@ -112,6 +112,13 @@ const McpInspector = ({ user, onLogout }) => {
 
       <section className="mcp-inspector__panel">
         <h2>How MCP tools work (this demo)</h2>
+        <p className="mcp-inspector__muted mcp-inspector__mb">
+          <strong>Whole path in one glance:</strong> your browser talks only to the <strong>Banking API (BFF)</strong>. The BFF
+          holds your OAuth session. When you invoke a tool here, the BFF acts as an <strong>MCP client</strong>: it may{' '}
+          <strong>exchange</strong> your session token for a token scoped to the MCP server (RFC 8693), opens a channel to the{' '}
+          <strong>MCP server</strong>, sends <code>tools/call</code>, and the MCP server performs REST calls to the Banking API
+          with the right Bearer token and scopes. Tokens from PingOne are created during login — not in this panel.
+        </p>
         <ol className="mcp-inspector__steps">
           <li>
             <strong>Discovery</strong> — Client asks the MCP server which tools exist (<code>tools/list</code> after{' '}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import axios from 'axios';
 import apiClient from '../services/apiClient';
@@ -192,7 +193,27 @@ const Dashboard = ({ user, onLogout }) => {
             </p>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <Link
+            to="/mcp-inspector"
+            title="MCP discovery, tools/list & tools/call via BFF"
+            style={{
+              background: 'rgba(255, 255, 255, 0.95)',
+              border: '2px solid rgba(255, 255, 255, 0.85)',
+              color: '#1e40af',
+              padding: '10px 18px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+              backdropFilter: 'blur(10px)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            MCP Inspector
+          </Link>
           <button 
             onClick={openTokenModal}
             title="View OAuth Token Info"

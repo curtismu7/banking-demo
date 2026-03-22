@@ -571,7 +571,14 @@ body {
   font-weight: 700;
 }
 
-.login-header p {
+.login-header .login-product-line {
+  color: #1e40af;
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.login-header p:not(.login-product-line) {
   color: #64748b;
   font-size: 1rem;
 }

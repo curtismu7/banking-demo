@@ -8,17 +8,14 @@ const Login = () => {
   const [searchParams] = useSearchParams();
 
   const handleOAuthLogin = () => {
-    // Redirect to OAuth login endpoint on the backend server
+    // OAuth redirect_uri to PingOne is computed on the server (must match PingOne app allowlist).
     const apiUrl = process.env.REACT_APP_API_URL || window.location.origin;
-    const clientUrl = process.env.REACT_APP_CLIENT_URL || window.location.origin;
-    window.location.href = `${apiUrl}/api/auth/oauth/login?redirect_uri=${encodeURIComponent(clientUrl + '/admin')}`;
+    window.location.href = `${apiUrl}/api/auth/oauth/login`;
   };
 
   const handleUserOAuthLogin = () => {
-    // Redirect to end user OAuth login endpoint
     const apiUrl = process.env.REACT_APP_API_URL || window.location.origin;
-    const clientUrl = process.env.REACT_APP_CLIENT_URL || window.location.origin;
-    window.location.href = `${apiUrl}/api/auth/oauth/user/login?redirect_uri=${encodeURIComponent(clientUrl + '/dashboard')}`;
+    window.location.href = `${apiUrl}/api/auth/oauth/user/login`;
   };
 
   // Handle OAuth error parameters from URL
@@ -73,6 +70,7 @@ const Login = () => {
               </div>
             </div>
             <h1>Secure Account Access</h1>
+            <p className="login-product-line">PingOne AI Core</p>
             <p>Sign in to access your banking services</p>
           </div>
 
@@ -92,7 +90,7 @@ const Login = () => {
                   className="btn btn-primary oauth-btn"
                   disabled={loading}
                 >
-                  {loading ? 'Redirecting...' : 'Admin Sign in with PingOne Core'}
+                  {loading ? 'Redirecting...' : 'Admin Sign in with PingOne AI Core'}
                 </button>
               </div>
 
@@ -108,7 +106,7 @@ const Login = () => {
                   className="btn btn-danger oauth-btn"
                   disabled={loading}
                 >
-                  {loading ? 'Redirecting...' : 'Customer Sign in with PingOne Core'}
+                  {loading ? 'Redirecting...' : 'Customer Sign in with PingOne AI Core'}
                 </button>
               </div>
             </div>
@@ -116,8 +114,8 @@ const Login = () => {
 
           <div className="login-footer">
             <p>
-              <strong>PingOne Core OAuth Authentication</strong><br />
-              Secure enterprise-grade authentication powered by PingOne Advanced Identity Cloud
+              <strong>PingOne AI Core</strong><br />
+              Secure authentication powered by PingOne Advanced Identity Cloud
             </p>
           </div>
         </div>

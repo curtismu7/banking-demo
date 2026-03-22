@@ -2,6 +2,22 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  /* Bottom-right stack: CIBA guide (regular button) above agent FAB — shared by CIBAPanel + BankingAgent */
+  --float-edge: 28px;
+  --float-gap: 12px;
+  --fab-size: 56px;
+  --ciba-action-height: 44px;
+  --fab-bottom: var(--float-edge);
+  --ciba-bottom: calc(var(--float-edge) + var(--fab-size) + var(--float-gap));
+  --agent-panel-bottom: calc(
+    var(--ciba-bottom) + var(--ciba-action-height) + var(--float-gap)
+  );
+}
+
+@media (max-width: 420px) {
+  .App {
+    --float-edge: 16px;
+  }
 }
 
 .main-content {

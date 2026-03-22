@@ -75,6 +75,93 @@ With CIBA:
   ✅  No redirect, no page reload
 `;
 
+/**
+ * Same swimlane pattern + RFC callouts as Agent Gateway demo architecture.vsdx:
+ * Web Browser SPA → Agent (security strip) → MCP ingress / egress gateway behavior
+ * → MCP Server / Tool → Resource Server; 401 → OAuth flows → Bearer retry;
+ * OAuth phased with resource indicator (RFC 8707).
+ */
+const FULL_STACK_DIAGRAM = `
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Pattern source: Agent Gateway demo architecture.vsdx (swimlanes + RFC strips) │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  Web Browser SPA
+       │
+       │  HTTPS (session cookie). No raw OAuth tokens in browser JS.
+       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Agent — security strip: OAuth 2.1 · RFC 8707 · RFC 9728 · RFC 7523 · RFC 8693│
+│   ┌─────┐    ┌────────┐    ┌────────────────┐                                 │
+│   │ LLM │    │ memory │    │ business logic │   (+ Sidecar / SDK where used)  │
+│   └─────┘    └────────┘    └────────────────┘                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+       │ REST / WebSocket to BFF                         │
+       │                                                 │
+       ▼                                                 ▼
+┌──────────────────────────────┐            ┌──────────────────────────────────┐
+│ MCP ingress (gateway role)   │            │ IDP / AS — PingOne              │
+│ • Introspection + scope       │            │ /authorize · /token ·           │
+│   enforcement for tools       │            │ introspect (RFC 7662) · JWKS    │
+│ • MCP authZ RFC 9728          │◀───────────│ Resource indicators RFC 8707   │
+│   (client ↔ authorization)    │            │ in authorize + token requests  │
+└──────────────┬───────────────┘            └──────────────────────────────────┘
+               │
+               │ MCP egress (outbound to MCP server / token actuation)
+               │ • Full RFC 9728 + RFC 8707 sequence with MCP peer
+               │ • Token exchange RFC 8693 with secure binding:
+               │   JWT client auth RFC 7523 or DPoP RFC 9449 (best practice)
+               ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MCP Server                              Tool                                  │
+│   tools/list · tools/call               API Key / Bearer to downstream       │
+└──────────────────────────────┬───────────────────────────────────────────────┘
+                               │
+                               │  Bearer access token (audience = Resource Server)
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Resource Server (RS) — Banking API HTTPS                                      │
+│ RS validates token + audience (https://…/api) + scopes                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  Tool call without acceptable token:
+       HTTP/1.1 401 Unauthorized  →  "attempt run tool"
+       → OAuth flows (PKCE in browser, or CIBA, or token exchange on BFF)
+       → "attempt again with bearer token"
+
+  MCP spec: clients MUST support Resource Indicators (RFC 8707) for OAuth —
+  https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
+
+── Phased OAuth with resource indicator (RFC 8707) — same structure as ref diagram ──
+  Phase 1  Authorization request  GET /authorize?…&resource=<RS URL>
+  Phase 2  Token request          POST /token  grant=authorization_code &resource=<RS>
+           AS limits audience to the requested resource
+  Phase 3  Resource access       GET …  Authorization: Bearer <AT for RS>
+
+── Optional: ID-JAG / XAA (draft) — identity assertion authorization grant ──
+  https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/
+
+── This banking demo maps: Web SPA → Banking BFF → PingOne AS → MCP server → Banking RS ──
+   CIBA: POST /bc-authorize + poll /token  (parallel track for push approval)
+`;
+
+const OAUTH_API_CHEATSHEET = `
+Browser-visible (same origin as app):
+  GET  /api/auth/oauth/login              Start admin OAuth (redirect to PingOne)
+  GET  /api/auth/oauth/user/login         Start end-user OAuth
+  GET  /api/auth/oauth/redirect-info      JSON: exact redirect_uri values for PingOne
+Server-only (after login):
+  GET  /api/auth/oauth/status             Admin session + userinfo
+  GET  /api/auth/oauth/user/status        End-user session
+MCP / agent:
+  POST /api/mcp/tool                      BFF → optional token exchange → MCP tools/call
+  GET  /api/mcp/inspector/tools           BFF MCP inspector: tools/list
+  POST /api/mcp/inspector/invoke          BFF MCP inspector: tools/call
+CIBA (when enabled):
+  POST /api/auth/ciba/initiate            Start backchannel auth
+  GET  /api/auth/ciba/poll/:authReqId     Poll until approved or denied
+`;
+
 const PINGONE_STEPS = [
   {
     step: '1',
@@ -269,6 +356,12 @@ function TryItTab({ cibaStatus }) {
   return (
     <div className="ciba-tab-content">
       <p className="ciba-section-desc">
+        <strong>What you are exercising:</strong> <code>POST /api/auth/ciba/initiate</code> starts a CIBA request at PingOne
+        (backchannel). The server returns an <code>auth_req_id</code>. This UI then calls{' '}
+        <code>GET /api/auth/ciba/poll/:id</code> until PingOne issues tokens (approved) or returns denied / expired.
+        Tokens are written to the <strong>BFF session</strong> — they are not returned to the browser.
+      </p>
+      <p className="ciba-section-desc">
         Initiate a live CIBA request. A push notification will be sent to the
         registered device for the user's email.
       </p>
@@ -382,10 +475,11 @@ export default function CIBAPanel() {
   }, []);
 
   const tabs = [
-    { id: 'what',    label: 'What is CIBA' },
-    { id: 'tryit',   label: '▶ Try It' },
-    { id: 'appflow', label: 'App Flows' },
-    { id: 'setup',   label: 'PingOne Setup' },
+    { id: 'what',      label: 'What is CIBA' },
+    { id: 'fullstack', label: 'Full stack' },
+    { id: 'tryit',     label: '▶ Try It' },
+    { id: 'appflow',   label: 'App Flows' },
+    { id: 'setup',     label: 'PingOne Setup' },
   ];
 
   return (
@@ -394,11 +488,11 @@ export default function CIBAPanel() {
       <button
         className={`ciba-fab${open ? ' ciba-fab--open' : ''}`}
         onClick={() => setOpen((o) => !o)}
-        title="CIBA — Backchannel Authentication"
-        aria-label="Open CIBA panel"
+        title="Learn CIBA — backchannel authentication & app flows"
+        aria-label="Open CIBA guide and try backchannel authentication"
       >
         <span className="ciba-fab-icon">📲</span>
-        <span className="ciba-fab-label">CIBA</span>
+        <span className="ciba-fab-label">CIBA guide</span>
         {cibaStatus?.enabled && <span className="ciba-fab-dot" title="CIBA enabled" />}
       </button>
 
@@ -418,7 +512,9 @@ export default function CIBAPanel() {
                 ? <span className="ciba-badge ciba-badge--on">Enabled</span>
                 : <span className="ciba-badge ciba-badge--off">Disabled</span>}
             </h2>
-            <p className="ciba-subtitle">OIDC CIBA Core 1.0 — push auth without browser redirects</p>
+            <p className="ciba-subtitle">
+              OIDC CIBA plus the full story: OAuth tokens, BFF session, MCP client/server, and API flows — open the <strong>Full stack</strong> tab for the map.
+            </p>
           </div>
           <button className="ciba-close" onClick={() => setOpen(false)} aria-label="Close">✕</button>
         </div>
@@ -431,7 +527,43 @@ export default function CIBAPanel() {
         </div>
 
         {/* Tab content */}
-        <div className="ciba-body">
+          <div className="ciba-body">
+
+          {/* ── Full stack (platform map) ── */}
+          {activeTab === 'fullstack' && (
+            <div className="ciba-tab-content">
+              <p className="ciba-section-desc">
+                The diagram below uses the <strong>same swimlane pattern and RFC callouts</strong> as{' '}
+                <strong>Agent Gateway demo architecture.vsdx</strong> in this repo: Web Browser SPA → Agent (security strip:
+                OAuth 2.1, RFC 8707, 9728, 7523, 8693) → MCP ingress / egress → MCP Server / Tool → Resource Server;
+                401 → OAuth flows → Bearer retry; phased OAuth with <strong>resource</strong> (RFC 8707). This app maps that
+                pattern onto <strong>PingOne</strong>, the <strong>Banking BFF</strong>, and <strong>banking_mcp_server</strong>.
+              </p>
+
+              <h3 className="ciba-section-title">Agent Gateway–style architecture map</h3>
+              <CodeBlock>{FULL_STACK_DIAGRAM}</CodeBlock>
+
+              <h3 className="ciba-section-title">How this demo maps to the diagram</h3>
+              <ul className="ciba-flow-list">
+                <li><strong>Web Browser SPA</strong> — React UI; session cookie only (no raw AT/RT in JavaScript).</li>
+                <li><strong>Agent / LLM</strong> — LangChain agent + chat widget (separate process); same MCP server as the BFF.</li>
+                <li><strong>MCP ingress (gateway role)</strong> — Banking BFF: scope checks, session, <code>/api/mcp/tool</code>, optional introspection.</li>
+                <li><strong>MCP egress</strong> — BFF performs RFC 8693 token exchange + WebSocket MCP to the server; RFC 8707 resource for MCP audience when configured.</li>
+                <li><strong>IDP / AS</strong> — PingOne (<code>/authorize</code>, <code>/token</code>, introspection).</li>
+                <li><strong>MCP Server + Tool</strong> — <code>banking_mcp_server</code>; tools call the Banking API with Bearer + scopes.</li>
+                <li><strong>Resource Server (RS)</strong> — Banking REST API (same host as BFF in this deployment).</li>
+              </ul>
+
+              <h3 className="ciba-section-title">Key API endpoints (this deployment)</h3>
+              <CodeBlock>{OAUTH_API_CHEATSHEET}</CodeBlock>
+
+              <div className="ciba-notice ciba-notice--info">
+                <strong>Chat widget / LangChain:</strong> the embedded chat uses a WebSocket to an agent host; that
+                agent uses its own MCP client to the same MCP server. The flow is parallel to <code>/api/mcp/tool</code> but
+                runs in a different process — both ultimately hit the same MCP tools and Banking API.
+              </div>
+            </div>
+          )}
 
           {/* ── What is CIBA ── */}
           {activeTab === 'what' && (
@@ -493,6 +625,7 @@ export default function CIBAPanel() {
               <p className="ciba-section-desc">
                 When the AI Banking Agent needs user tokens to call the Banking API,
                 CIBA replaces the awkward "open this URL in your browser" redirect.
+                The <strong>Full stack</strong> tab shows how MCP tools, token exchange, and REST APIs connect; here we focus on why CIBA helps chat and agent flows.
               </p>
               <CodeBlock>{MCP_FLOW}</CodeBlock>
 

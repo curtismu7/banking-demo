@@ -25,6 +25,7 @@ const adminRoutes       = require('./routes/admin');
 const adminConfigRoutes = require('./routes/adminConfig');
 const cibaRoutes        = require('./routes/ciba');
 const mcpInspectorRoutes = require('./routes/mcpInspector');
+const { getOAuthRedirectDebugInfo } = require('./services/oauthRedirectUris');
 
 // Import middleware
 const { authenticateToken } = require('./middleware/auth');
@@ -137,6 +138,16 @@ app.get('/api/auth/logout', (req, res) => {
 // unauthenticated requests to the config endpoint are not blocked by the
 // authenticateToken middleware that guards the broader /api/admin/* prefix.
 app.use('/api/admin/config', adminConfigRoutes);
+
+// PingOne redirect URI allowlist (JSON). Registered here BEFORE /api/auth so the path is not
+// handled only by routes/auth.js (avoids "Cannot GET" on some deployments).
+app.get('/api/auth/oauth/redirect-info', (req, res) => {
+  try {
+    res.json(getOAuthRedirectDebugInfo(req));
+  } catch (err) {
+    res.status(500).json({ error: 'redirect_info_failed', message: err.message });
+  }
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/auth/oauth', oauthRoutes);

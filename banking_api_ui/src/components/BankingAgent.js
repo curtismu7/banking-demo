@@ -115,11 +115,10 @@ const LOGIN_ACTIONS = [
 
 function handleLoginAction(actionId) {
   const apiUrl = process.env.REACT_APP_API_URL || window.location.origin;
-  const clientUrl = process.env.REACT_APP_CLIENT_URL || window.location.origin;
   if (actionId === 'login_admin') {
-    window.location.href = `${apiUrl}/api/auth/oauth/login?redirect_uri=${encodeURIComponent(clientUrl + '/admin')}`;
+    window.location.href = `${apiUrl}/api/auth/oauth/login`;
   } else {
-    window.location.href = `${apiUrl}/api/auth/oauth/user/login?redirect_uri=${encodeURIComponent(clientUrl + '/dashboard')}`;
+    window.location.href = `${apiUrl}/api/auth/oauth/user/login`;
   }
 }
 
@@ -128,18 +127,26 @@ export default function BankingAgent({ user }) {
   const [activeAction, setActiveAction] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [isConfigured, setIsConfigured] = useState(null);
+  /** null = loading; which OAuth flows have client IDs + environment */
+  const [oauthConfig, setOauthConfig] = useState(null);
   const bottomRef = useRef(null);
   const navigate = useNavigate();
 
   const isLoggedIn = !!user;
+  const isConfigured = oauthConfig && (oauthConfig.admin || oauthConfig.user);
 
   // Check config status from IndexedDB cache whenever panel opens
   useEffect(() => {
     if (isOpen && !isLoggedIn) {
-      loadPublicConfig().then(cfg => {
-        setIsConfigured(!!(cfg.pingone_environment_id && cfg.admin_client_id));
-      }).catch(() => setIsConfigured(false));
+      loadPublicConfig()
+        .then(cfg => {
+          const env = !!cfg.pingone_environment_id;
+          setOauthConfig({
+            admin: env && !!cfg.admin_client_id,
+            user: env && !!cfg.user_client_id,
+          });
+        })
+        .catch(() => setOauthConfig({ admin: false, user: false }));
     }
   }, [isOpen, isLoggedIn]);
 
@@ -231,7 +238,7 @@ export default function BankingAgent({ user }) {
             <div className="banking-agent-header-info">
               <span className="banking-agent-avatar">🏦</span>
               <div>
-                <div className="banking-agent-title">Banking Agent</div>
+                <div className="banking-agent-title">PingOne AI Core</div>
                 <div className="banking-agent-subtitle">
                   {isLoggedIn ? `Powered by MCP · ${user.name?.split(' ')[0] || 'Secure'}` : 'How can I help you today?'}
                 </div>
@@ -246,13 +253,23 @@ export default function BankingAgent({ user }) {
               <div className="banking-agent-welcome">
                 <p>
                   {isLoggedIn
-                    ? 'Select an action below to interact with your accounts via the MCP server.'
-                    : isConfigured
-                      ? 'PingOne is configured. Sign in to get started.'
-                      : isConfigured === false
-                        ? 'Set up your PingOne credentials to get started.'
-                        : 'Welcome to SecureBank. Please sign in to access your accounts.'}
+                    ? 'Select an action below. Calls go from this app to the Banking API; the MCP server runs banking tools and talks to the same API with scoped tokens.'
+                    : oauthConfig === null
+                      ? 'Welcome to PingOne AI Core. Checking configuration…'
+                      : isConfigured
+                        ? 'PingOne AI Core is configured. Sign in to get started.'
+                        : 'Set up your PingOne credentials to get started.'}
                 </p>
+                <details className="banking-agent-learn">
+                  <summary>How OAuth, API &amp; MCP work together</summary>
+                  <ol>
+                    <li><strong>Sign in</strong> — Your browser follows PingOne OAuth (PKCE). Tokens are created at PingOne and stored in the Banking API session, not in localStorage.</li>
+                    <li><strong>REST calls</strong> — Buttons below use <code>/api/…</code> routes; the server uses your session to know who you are.</li>
+                    <li><strong>MCP</strong> — The MCP server exposes tools (accounts, transfers). The Banking API can call it via WebSocket; tools may use a delegated token (RFC 8693 exchange) scoped for the MCP audience.</li>
+                    <li><strong>CIBA</strong> — Optional push approval without a full redirect (see the <strong>CIBA guide</strong> button).</li>
+                  </ol>
+                  <p className="banking-agent-learn-hint">Open <strong>CIBA guide → Full stack</strong> for the full diagram and endpoint list.</p>
+                </details>
               </div>
             )}
             {messages.map(msg => (
@@ -317,17 +334,31 @@ export default function BankingAgent({ user }) {
                           <span className="banking-agent-next-label">Next → Sign in</span>
                         </div>
                       )}
-                      {LOGIN_ACTIONS.map(a => (
-                        <button
-                          key={a.id}
-                          className={`banking-agent-action-btn banking-agent-login-btn${isConfigured ? ' banking-agent-login-ready' : ''}`}
-                          onClick={() => handleLoginAction(a.id)}
-                          title={a.desc}
-                          disabled={isConfigured === false}
-                        >
-                          {a.label}
-                        </button>
-                      ))}
+                      {LOGIN_ACTIONS.map(a => {
+                        const canAdmin = oauthConfig?.admin;
+                        const canUser = oauthConfig?.user;
+                        const canUse =
+                          a.id === 'login_admin' ? canAdmin : canUser;
+                        return (
+                          <button
+                            key={a.id}
+                            className={`banking-agent-action-btn banking-agent-login-btn${isConfigured ? ' banking-agent-login-ready' : ''}`}
+                            onClick={() => handleLoginAction(a.id)}
+                            title={
+                              oauthConfig === null
+                                ? a.desc
+                                : canUse
+                                  ? a.desc
+                                  : a.id === 'login_admin'
+                                    ? 'Configure admin client ID in Settings'
+                                    : 'Configure end-user client ID in Settings'
+                            }
+                            disabled={oauthConfig === null || !canUse}
+                          >
+                            {a.label}
+                          </button>
+                        );
+                      })}
                     </>
                   )
               }

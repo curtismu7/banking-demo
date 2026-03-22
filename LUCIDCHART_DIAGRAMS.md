@@ -2,6 +2,71 @@
 
 Source of truth for the diagrams below. Open in **diagrams.net (draw.io)** with your Mermaid extension and paste **one** fenced block at a time.
 
+**Reference Visio:** `Agent Gateway demo architecture.vsdx` (repo root) — swimlanes, security/RFC strips, MCP ingress & egress gateway behavior, Baseline vs Gateway, 401 → OAuth → Bearer retry, and phased OAuth with **resource** (RFC 8707). The diagram below mirrors that **pattern** and labels; ports and hosts match this banking repo.
+
+---
+
+## Diagram 0: Agent Gateway pattern (aligned with Agent Gateway demo architecture.vsdx)
+
+Same information class as the Visio: actors, RFC callouts, ingress/egress, RS as audience-bound resource.
+
+```mermaid
+flowchart TB
+  subgraph WEB["Web Browser SPA"]
+    SPA["React SPA\nHTTPS + session cookie"]
+  end
+
+  subgraph AGENT["Agent — security: OAuth 2.1 · RFC 8707 · RFC 9728 · RFC 7523 · RFC 8693"]
+    LLM["LLM"]
+    MEM["memory"]
+    BL["business logic"]
+  end
+
+  subgraph AS["IDP / AS — PingOne"]
+    AUTHZ["/authorize · /token\nresource RFC 8707"]
+    INTRO["/introspect RFC 7662 · JWKS"]
+  end
+
+  subgraph INGRESS["MCP ingress — BFF gateway behavior"]
+    I1["Introspection + scope enforcement\non behalf of downstream tools"]
+    I2["MCP authorization RFC 9728\nMCP spec requires RFC 8707"]
+  end
+
+  subgraph EGRESS["MCP egress"]
+    E1["RFC 9728 + RFC 8707 with MCP peer"]
+    E2["Token exchange RFC 8693\nbinding RFC 7523 or DPoP 9449"]
+  end
+
+  subgraph MCP["MCP Server"]
+    TLIST["tools/list · tools/call"]
+    TH["Tool handler"]
+  end
+
+  subgraph RS["Resource Server — Banking API"]
+    API["RS validates aud + scopes"]
+  end
+
+  OAUTH["OAuth flows\nPKCE · CIBA · RFC 8693"]
+
+  SPA --> AGENT
+  AGENT --> INGRESS
+  INGRESS --> AS
+  AS --> INGRESS
+  INGRESS --> EGRESS
+  EGRESS --> MCP
+  TH -->|"Bearer AT"| API
+  API -.->|"401 Unauthorized"| OAUTH
+  OAUTH -.->|"attempt again with Bearer"| TH
+```
+
+### Phased OAuth with resource indicator (RFC 8707) — same steps as reference slide
+
+| Phase | Step | Action |
+|-------|------|--------|
+| 1 | 1–4 | Authorization request with `resource=<RS URL>` → consent → authorization **code** |
+| 2 | 5–6 | Token request `grant_type=authorization_code` + `resource` → AS limits **audience** to RS |
+| 3 | 7–8 | Resource request `Authorization: Bearer` → RS validates audience |
+
 ---
 
 ## Diagram 1: Component Architecture
