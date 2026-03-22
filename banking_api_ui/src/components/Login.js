@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 
 const Login = () => {
   const [loading, setLoading] = useState(false);
@@ -84,7 +84,7 @@ const Login = () => {
             <div className="oauth-options">
               <div className="oauth-option">
                 <h4>Admin Access</h4>
-                <p>Access the admin panel with full system privileges</p>
+                <p>Uses the admin PingOne app → after login you land on <strong>Admin Dashboard</strong> (<code>/admin</code>): logs, all users &amp; accounts, security settings, config.</p>
                 <button
                   onClick={handleOAuthLogin}
                   className="btn btn-primary oauth-btn"
@@ -100,7 +100,7 @@ const Login = () => {
 
               <div className="oauth-option">
                 <h4>End User Access</h4>
-                <p>Access your personal account dashboard</p>
+                <p>Uses the customer PingOne app → <strong>Personal dashboard</strong> (<code>/dashboard</code>) with your accounts only.</p>
                 <button
                   onClick={handleUserOAuthLogin}
                   className="btn btn-danger oauth-btn"
@@ -111,6 +111,19 @@ const Login = () => {
               </div>
             </div>
           </div>
+
+          <details className="login-education-details" style={{ marginTop: '1rem', fontSize: '0.85rem', color: '#4b5563', lineHeight: 1.5 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#1f2937' }}>Admin vs customer vs Banking Agent</summary>
+            <p style={{ margin: '0.75rem 0 0.5rem 0' }}>
+              <strong>Admin</strong> and <strong>Customer</strong> are two separate OAuth flows (two PingOne apps or one app with two callbacks). The <strong>Banking Agent</strong> panel is not another identity: once you are signed in, it runs MCP tools with <em>your</em> session. More detail: open the floating <strong>CIBA guide</strong> → <strong>Sign-in &amp; roles</strong> tab, or <Link to="/onboarding">setup checklist</Link>.
+            </p>
+          </details>
+
+          <p className="login-onboarding-hint" style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.9rem' }}>
+            <Link to="/onboarding" style={{ color: '#2563eb', fontWeight: 500 }}>
+              First-time setup — what to configure in PingOne
+            </Link>
+          </p>
 
           <div className="login-footer">
             <p>

@@ -14,6 +14,7 @@ import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
 import SecuritySettings from './components/SecuritySettings';
 import Config from './components/Config';
+import Onboarding from './components/Onboarding';
 import CIBAPanel from './components/CIBAPanel';
 import McpInspector from './components/McpInspector';
 import './App.css';
@@ -159,6 +160,7 @@ function App() {
         {/* Config page is always accessible, regardless of auth state */}
         <Routes>
           <Route path="/config" element={<Config />} />
+          <Route path="/onboarding" element={<Onboarding />} />
           <Route path="*" element={
             !user ? (
               <>

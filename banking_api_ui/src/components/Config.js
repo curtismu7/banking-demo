@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { savePublicConfig, loadPublicConfig } from '../services/configService';
+import McpInspectorSetupWizard from './McpInspectorSetupWizard';
 
 // ─── Region options ───────────────────────────────────────────────────────────
 const REGION_OPTIONS = [
@@ -115,6 +117,8 @@ export default function Config() {
   const [storageType, setStorageType] = useState('');
   const [isConfigured, setIsConfigured] = useState(false);
   const [readOnly, setReadOnly]       = useState(false);
+  /** Vercel: OAuth client IDs/secrets (and worker) come from deployment — UI does not edit them. */
+  const [deploymentManaged, setDeploymentManaged] = useState(false);
 
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
@@ -153,6 +157,7 @@ export default function Config() {
         }
       }
 
+      setDeploymentManaged(!!data.deploymentManagedPingOneOAuth);
       setForm((prev) => ({ ...prev, ...formUpdates }));
       setSecretMeta(meta);
       setStorageType(data.storageType || '');
@@ -277,8 +282,12 @@ export default function Config() {
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 600 }}>⚙️ Application Configuration</h1>
-            <p style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.25rem' }}>
-              PingOne OAuth settings — stored in {storageType === 'vercel-kv' ? 'Vercel KV (cloud)' : 'SQLite (local)'}
+            <p style={{ fontSize: '0.875rem', opacity: 0.85, marginTop: '0.25rem' }}>
+              {deploymentManaged ? (
+                <><strong>Vercel:</strong> PingOne OAuth clients (admin, customer, and Authorize worker) are <strong>pre-configured on the server</strong>. Visitors use <strong>Admin</strong> and <strong>Customer</strong> sign-in — this page does not collect client IDs or secrets.{' '}</>
+              ) : (
+                <><strong>Local:</strong> configure PingOne apps here (admin + end-user). Stored in SQLite.{' '}</>
+              )}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -292,7 +301,8 @@ export default function Config() {
                 ⚠ Not configured
               </span>
             )}
-            <a href="/" style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.875rem', textDecoration: 'none' }}>← Back to app</a>
+            <Link to="/onboarding" style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.875rem' }}>Setup guide</Link>
+            <Link to="/" style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.875rem', textDecoration: 'none' }}>← Back to app</Link>
           </div>
         </div>
       </div>
@@ -309,12 +319,68 @@ export default function Config() {
             marginBottom: '1.5rem',
             color: '#1e40af',
           }}>
-            <strong>Read-only mode:</strong> This server has no KV database attached, so settings must come from environment variables (or connect Vercel KV / Upstash and redeploy). Local development without this restriction uses SQLite and can save here.
+            <strong>Read-only mode (Vercel, no KV):</strong> Settings must come from environment variables (or connect Vercel KV / Upstash and redeploy). On <strong>localhost</strong>, the app uses SQLite and this page can save all fields, including separate admin and user OAuth apps when not on Vercel.
           </div>
         )}
 
-        {/* First-run banner */}
-        {!isConfigured && !readOnly && (
+        {deploymentManaged && (
+          <div style={{
+            background: '#ecfdf5',
+            border: '1px solid #a7f3d0',
+            borderRadius: '0.5rem',
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            color: '#065f46',
+            fontSize: '0.9rem',
+          }}>
+            <strong>Hosted deployment:</strong> OAuth <strong>client IDs and secrets</strong> (authorization + worker token) are stored in the backend — not entered here. The <strong>login page still has both</strong> <em>Admin sign-in</em> and <em>Customer sign-in</em>; each flow uses the server-side configuration. Below: reference redirect URIs only.
+          </div>
+        )}
+
+        {!deploymentManaged && (
+          <div style={{
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: '0.5rem',
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            color: '#166534',
+            fontSize: '0.9rem',
+          }}>
+            <strong>Local development:</strong> Configure <strong>Admin</strong> and <strong>End-User</strong> OAuth apps independently (two PingOne apps, two client IDs/secrets). This layout is only shown when the API server is not running on Vercel.
+          </div>
+        )}
+
+        {/* Step-by-step directions */}
+        <div className="card" style={{ marginBottom: '1.5rem', borderColor: '#c7d2fe', background: '#f8fafc' }}>
+          <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.35rem' }}>
+            <h2 className="card-title" style={{ margin: 0 }}>How to complete this form</h2>
+            <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: 0 }}>
+              For a printable-style checklist, open the <Link to="/onboarding">onboarding guide</Link>. Follow the steps below in order.
+            </p>
+          </div>
+          <ol style={{ margin: 0, padding: '0 0 0 1.25rem', fontSize: '0.875rem', color: '#374151', lineHeight: 1.65 }}>
+            {deploymentManaged ? (
+              <>
+                <li>You do <strong>not</strong> configure PingOne OAuth client credentials on this page — they are set in the deployment (environment / KV).</li>
+                <li>Use <strong>Admin sign-in</strong> and <strong>Customer sign-in</strong> on the login page; both flows are available and use the pre-configured backend settings.</li>
+                <li>Optional: adjust other settings below if your deployment allows it (read-only mode may apply when KV is not attached).</li>
+              </>
+            ) : (
+              <>
+                <li>In PingOne, create <strong>two</strong> OIDC web applications (admin + end user). Copy each <strong>redirect URI</strong> into the matching PingOne app — exact match required.</li>
+                <li>Enter <strong>Environment ID</strong>, <strong>region</strong>, and <strong>frontend URL</strong>, then <strong>Test PingOne Connection</strong>.</li>
+                <li>Enter each app&apos;s <strong>client ID</strong> and <strong>client secret</strong>. Leave secrets blank if &quot;already set&quot; and you are not rotating them.</li>
+              </>
+            )}
+            <li>Set a random <strong>session secret</strong> (32+ characters) and the <strong>admin / customer role names</strong> that match your PingOne setup.</li>
+            <li>Optional: <strong>PingOne Authorize</strong> for transfer policy; <strong>Advanced</strong> / MCP URL is for local use.</li>
+            <li><strong>Save Configuration</strong>, then sign in with Admin or Customer as needed.</li>
+          </ol>
+        </div>
+
+        {/* First-run banner (local setup only) */}
+        {!isConfigured && !readOnly && !deploymentManaged && (
           <div style={{
             background: '#fff7ed',
             border: '1px solid #fed7aa',
@@ -323,8 +389,8 @@ export default function Config() {
             marginBottom: '1.5rem',
             color: '#9a3412',
           }}>
-            <strong>First-time setup:</strong> Fill in your PingOne credentials below and click <strong>Save Configuration</strong>.
-            Settings are persisted in {storageType === 'vercel-kv' ? 'Vercel KV' : 'SQLite'} so they survive server restarts.
+            <strong>Not saved yet:</strong> Complete the fields below, then <strong>Save Configuration</strong>.
+            Values are stored in {storageType === 'vercel-kv' ? 'Vercel KV' : 'SQLite'} so they survive restarts.
           </div>
         )}
 
@@ -332,8 +398,13 @@ export default function Config() {
 
           {/* ── Section 1: PingOne Environment ── */}
           <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">PingOne Environment</h2>
+            <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+              <h2 className="card-title" style={{ margin: 0 }}>PingOne Environment</h2>
+              <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                {deploymentManaged
+                  ? 'Values below reflect the deployment (read-only). OAuth clients are configured server-side.'
+                  : 'Identifies your tenant. Test the connection before relying on sign-in.'}
+              </span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div style={{ gridColumn: '1 / -1' }}>
@@ -344,7 +415,7 @@ export default function Config() {
                   onChange={handleChange}
                   placeholder="e.g. a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                   help="Found in PingOne → Environments → (your env) → Settings → Environment ID"
-                  disabled={readOnly}
+                  disabled={readOnly || deploymentManaged}
                 />
               </div>
               <div>
@@ -353,7 +424,7 @@ export default function Config() {
                   className="form-input"
                   value={form.pingone_region}
                   onChange={(e) => handleChange('pingone_region', e.target.value)}
-                  disabled={readOnly}
+                  disabled={readOnly || deploymentManaged}
                 >
                   {REGION_OPTIONS.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
@@ -368,7 +439,7 @@ export default function Config() {
                   onChange={handleChange}
                   placeholder={window.location.origin}
                   help="The URL your React app is served from"
-                  disabled={readOnly}
+                  disabled={readOnly || deploymentManaged}
                 />
               </div>
             </div>
@@ -379,7 +450,7 @@ export default function Config() {
                 type="button"
                 className="btn btn-secondary"
                 onClick={handleTest}
-                disabled={testing || !form.pingone_environment_id}
+                disabled={testing || !form.pingone_environment_id || !form.admin_client_id}
               >
                 {testing ? 'Testing…' : '🔌 Test PingOne Connection'}
               </button>
@@ -403,94 +474,130 @@ export default function Config() {
             </div>
           </div>
 
-          {/* ── Section 2: Admin OAuth App ── */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Admin OAuth App</h2>
-              <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Authorization Code + PKCE · admin users</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <TextField
-                label="Client ID"
-                fieldKey="admin_client_id"
-                value={form.admin_client_id}
-                onChange={handleChange}
-                placeholder="Admin app client ID"
-                disabled={readOnly}
-              />
-              <div /> {/* spacer */}
-              <div style={{ gridColumn: '1 / -1' }}>
-                <SecretField
-                  label="Client Secret"
-                  fieldKey="admin_client_secret"
-                  value={form.admin_client_secret}
-                  isSet={!!secretMeta.admin_client_secret_set}
-                  showValue={!!showSecret.admin_client_secret}
-                  onToggleShow={toggleShow}
-                  onChange={handleChange}
-                  help="Leave blank to keep the existing secret stored on the server"
-                  disabled={readOnly}
-                />
+          {/* ── OAuth: Vercel = deployment-managed; local = full editor ── */}
+          {deploymentManaged ? (
+            <div className="card" style={{ borderColor: '#a7f3d0', background: '#f8fffc' }}>
+              <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.35rem' }}>
+                <h2 className="card-title" style={{ margin: 0 }}>PingOne OAuth (deployment)</h2>
+                <span style={{ fontSize: '0.8rem', color: '#374151', lineHeight: 1.5 }}>
+                  Admin and Customer sign-in each use OAuth clients configured <strong>on the server</strong> (not on this screen). The login page offers <strong>both</strong> buttons — Admin and Customer — with different PingOne redirect URIs. Client IDs, client secrets, and worker credentials are supplied by the deployment.
+                </span>
               </div>
-              <div style={{ gridColumn: '1 / -1' }}>
+              <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 1rem 0' }}>
+                Reference only — register these in PingOne if you operate the tenant:
+              </p>
+              <div style={{ display: 'grid', gap: '1rem' }}>
                 <TextField
-                  label="Redirect URI (must match PingOne app settings)"
+                  label="Admin OAuth redirect URI (reference)"
                   fieldKey="admin_redirect_uri"
                   value={form.admin_redirect_uri}
                   onChange={handleChange}
                   placeholder={`${window.location.origin}/api/auth/oauth/callback`}
-                  disabled={readOnly}
+                  help="Callback for Admin sign-in flow."
+                  disabled
                 />
-              </div>
-            </div>
-          </div>
-
-          {/* ── Section 3: End-User OAuth App ── */}
-          <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">End-User OAuth App</h2>
-              <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Authorization Code + PKCE · banking customers</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <TextField
-                label="Client ID"
-                fieldKey="user_client_id"
-                value={form.user_client_id}
-                onChange={handleChange}
-                placeholder="End-user app client ID"
-                disabled={readOnly}
-              />
-              <div />
-              <div style={{ gridColumn: '1 / -1' }}>
-                <SecretField
-                  label="Client Secret"
-                  fieldKey="user_client_secret"
-                  value={form.user_client_secret}
-                  isSet={!!secretMeta.user_client_secret_set}
-                  showValue={!!showSecret.user_client_secret}
-                  onToggleShow={toggleShow}
-                  onChange={handleChange}
-                  help="Leave blank to keep the existing secret stored on the server"
-                  disabled={readOnly}
-                />
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
                 <TextField
-                  label="Redirect URI (must match PingOne app settings)"
+                  label="Customer OAuth redirect URI (reference)"
                   fieldKey="user_redirect_uri"
                   value={form.user_redirect_uri}
                   onChange={handleChange}
                   placeholder={`${window.location.origin}/api/auth/oauth/user/callback`}
-                  disabled={readOnly}
+                  help="Callback for Customer sign-in flow."
+                  disabled
                 />
               </div>
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="card">
+                <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                  <h2 className="card-title" style={{ margin: 0 }}>Admin OAuth App</h2>
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Authorization Code + PKCE · used for admin dashboard sign-in. Register the redirect URI below in this PingOne app.</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <TextField
+                    label="Client ID"
+                    fieldKey="admin_client_id"
+                    value={form.admin_client_id}
+                    onChange={handleChange}
+                    placeholder="Admin app client ID"
+                    disabled={readOnly}
+                  />
+                  <div />
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <SecretField
+                      label="Client Secret"
+                      fieldKey="admin_client_secret"
+                      value={form.admin_client_secret}
+                      isSet={!!secretMeta.admin_client_secret_set}
+                      showValue={!!showSecret.admin_client_secret}
+                      onToggleShow={toggleShow}
+                      onChange={handleChange}
+                      help="Leave blank to keep the existing secret stored on the server"
+                      disabled={readOnly}
+                    />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <TextField
+                      label="Redirect URI (must match PingOne app settings)"
+                      fieldKey="admin_redirect_uri"
+                      value={form.admin_redirect_uri}
+                      onChange={handleChange}
+                      placeholder={`${window.location.origin}/api/auth/oauth/callback`}
+                      disabled={readOnly}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                  <h2 className="card-title" style={{ margin: 0 }}>End-User OAuth App</h2>
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Authorization Code + PKCE · used for customer sign-in. Use a separate PingOne app from the admin app.</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <TextField
+                    label="Client ID"
+                    fieldKey="user_client_id"
+                    value={form.user_client_id}
+                    onChange={handleChange}
+                    placeholder="End-user app client ID"
+                    disabled={readOnly}
+                  />
+                  <div />
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <SecretField
+                      label="Client Secret"
+                      fieldKey="user_client_secret"
+                      value={form.user_client_secret}
+                      isSet={!!secretMeta.user_client_secret_set}
+                      showValue={!!showSecret.user_client_secret}
+                      onToggleShow={toggleShow}
+                      onChange={handleChange}
+                      help="Leave blank to keep the existing secret stored on the server"
+                      disabled={readOnly}
+                    />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <TextField
+                      label="Redirect URI (must match PingOne app settings)"
+                      fieldKey="user_redirect_uri"
+                      value={form.user_redirect_uri}
+                      onChange={handleChange}
+                      placeholder={`${window.location.origin}/api/auth/oauth/user/callback`}
+                      disabled={readOnly}
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* ── Section 4: Session & Roles ── */}
           <div className="card">
-            <div className="card-header">
-              <h2 className="card-title">Session & Roles</h2>
+            <div className="card-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+              <h2 className="card-title" style={{ margin: 0 }}>Session &amp; Roles</h2>
+              <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>Session cookies are signed with the session secret. Role names must match how your PingOne users are assigned (e.g. group → role mapping).</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <TextField
@@ -560,29 +667,41 @@ export default function Config() {
                 disabled={readOnly}
               />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
-              <TextField
-                label="Worker App Client ID"
-                fieldKey="authorize_worker_client_id"
-                value={form.authorize_worker_client_id}
-                onChange={handleChange}
-                placeholder="Worker app client ID"
-                help="Client ID of the Worker application used to obtain tokens for policy evaluation."
-                disabled={readOnly}
-              />
-              <SecretField
-                label="Worker App Client Secret"
-                fieldKey="authorize_worker_client_secret"
-                value={form.authorize_worker_client_secret}
-                isSet={secretMeta.authorize_worker_client_secret_set}
-                showValue={!!showSecret.authorize_worker_client_secret}
-                onToggleShow={toggleShow}
-                onChange={handleChange}
-                help="Client secret for the Worker app. Stored encrypted at rest."
-                disabled={readOnly}
-              />
-            </div>
+            {deploymentManaged ? (
+              <p style={{ fontSize: '0.85rem', color: '#374151', marginTop: '1rem', padding: '0.75rem', background: '#f3f4f6', borderRadius: '0.375rem' }}>
+                <strong>Worker app credentials</strong> for PingOne Authorize are configured in the deployment (same as OAuth clients). They are not edited on this page.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem' }}>
+                <TextField
+                  label="Worker App Client ID"
+                  fieldKey="authorize_worker_client_id"
+                  value={form.authorize_worker_client_id}
+                  onChange={handleChange}
+                  placeholder="Worker app client ID"
+                  help="Client ID of the Worker application used to obtain tokens for policy evaluation."
+                  disabled={readOnly}
+                />
+                <SecretField
+                  label="Worker App Client Secret"
+                  fieldKey="authorize_worker_client_secret"
+                  value={form.authorize_worker_client_secret}
+                  isSet={secretMeta.authorize_worker_client_secret_set}
+                  showValue={!!showSecret.authorize_worker_client_secret}
+                  onToggleShow={toggleShow}
+                  onChange={handleChange}
+                  help="Client secret for the Worker app. Stored encrypted at rest."
+                  disabled={readOnly}
+                />
+              </div>
+            )}
           </div>
+
+          <McpInspectorSetupWizard
+            appBaseUrl={form.frontend_url || (typeof window !== 'undefined' ? window.location.origin : '')}
+            mcpAgentUrl={form.mcp_server_url}
+            storageType={storageType}
+          />
 
           {/* ── Section 6: Advanced ── */}
           <div className="card">

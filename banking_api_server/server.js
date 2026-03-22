@@ -25,6 +25,7 @@ const adminRoutes       = require('./routes/admin');
 const adminConfigRoutes = require('./routes/adminConfig');
 const cibaRoutes        = require('./routes/ciba');
 const mcpInspectorRoutes = require('./routes/mcpInspector');
+const agentIdentityRoutes = require('./routes/agentIdentity');
 const { getOAuthRedirectDebugInfo } = require('./services/oauthRedirectUris');
 
 // Import middleware
@@ -153,6 +154,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/auth/oauth', oauthRoutes);
 app.use('/api/auth/oauth/user', oauthUserRoutes);
 app.use('/api/auth/ciba', cibaRoutes);
+app.use('/api/agent', agentIdentityRoutes);
 app.use('/api/mcp/inspector', authenticateToken, mcpInspectorRoutes);
 app.use('/api/users', authenticateToken, userRoutes);
 app.use('/api/accounts', authenticateToken, accountRoutes);
@@ -265,12 +267,8 @@ const { oauthErrorHandler } = require('./middleware/oauthErrorHandler');
 // with `act: { client_id: <bff> }` and a scope narrowed to what the tool needs,
 // scoped to the MCP server audience — the user's raw token never leaves the BFF.
 
-const oauthService = require('./services/oauthService');
-const {
-  MCP_TOOL_SCOPES,
-  getSessionAccessToken,
-  mcpCallTool,
-} = require('./services/mcpWebSocketClient');
+const { resolveMcpAccessToken } = require('./services/agentMcpTokenService');
+const { mcpCallTool } = require('./services/mcpWebSocketClient');
 
 // POST /api/mcp/tool — call a banking MCP tool
 app.post('/api/mcp/tool', express.json(), async (req, res) => {
@@ -280,22 +278,16 @@ app.post('/api/mcp/tool', express.json(), async (req, res) => {
     return res.status(400).json({ error: 'tool name is required' });
   }
 
-  let agentToken = getSessionAccessToken(req);
+  let agentToken;
+  try {
+    agentToken = await resolveMcpAccessToken(req, tool);
+  } catch (err) {
+    console.error(`[MCP Proxy] Token resolution failed for tool ${tool}:`, err.message);
+    return res.status(502).json({ error: 'token_exchange_failed', message: err.message });
+  }
 
-  // RFC 8693 Token Exchange — when MCP_SERVER_RESOURCE_URI is configured,
-  // exchange the user's session token for a delegated token scoped to the MCP
-  // server. The resulting token carries `act: { client_id: <bff> }` so the MCP
-  // server can verify the BFF is the actor and the scope is narrowed to only
-  // what this specific tool needs.
-  const mcpResourceUri = configStore.getEffective('mcp_resource_uri');
-  if (agentToken && mcpResourceUri) {
-    try {
-      const toolScopes = MCP_TOOL_SCOPES[tool] || ['banking:read'];
-      agentToken = await oauthService.performTokenExchange(agentToken, mcpResourceUri, toolScopes);
-    } catch (err) {
-      console.error(`[MCP Proxy] Token exchange failed for tool ${tool}:`, err.message);
-      return res.status(502).json({ error: 'token_exchange_failed', message: err.message });
-    }
+  if (!agentToken) {
+    return res.status(401).json({ error: 'authentication_required', message: 'Sign in to use the banking agent.' });
   }
 
   try {

@@ -184,6 +184,75 @@ class OAuthService {
   }
 
   /**
+   * RFC 8693 Token Exchange with both subject (end user) and actor (agent OAuth client) tokens.
+   * The issued access token represents the user (subject) with the agent acting on their behalf.
+   * Requires PingOne token-exchange grant on the BFF client and compatible may_act / actor policy.
+   *
+   * @param {string} subjectToken - User's access token (who is affected)
+   * @param {string} actorToken   - Agent client-credentials token (who performs the action)
+   */
+  async performTokenExchangeWithActor(subjectToken, actorToken, audience, scopes) {
+    const scopeStr = Array.isArray(scopes) ? scopes.join(' ') : scopes;
+    const body = new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      subject_token: subjectToken,
+      subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      actor_token: actorToken,
+      actor_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      requested_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      audience: audience,
+      scope: scopeStr,
+      client_id: this.config.clientId,
+    });
+    if (this.config.clientSecret) {
+      body.set('client_secret', this.config.clientSecret);
+    }
+    try {
+      const response = await axios.post(this.config.tokenEndpoint, body.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      const exchanged = response.data.access_token;
+      if (!exchanged) throw new Error('Token exchange response missing access_token');
+      console.log(`[TokenExchange+Actor] Delegated token audience=${audience} scope="${scopeStr}"`);
+      return exchanged;
+    } catch (error) {
+      console.error('[TokenExchange+Actor] Failed:', error.response?.data || error.message);
+      throw new Error(`Actor token exchange failed: ${error.response?.data?.error_description || error.message}`);
+    }
+  }
+
+  /**
+   * Client-credentials token for the dedicated "agent actor" OAuth application (PingOne).
+   * Used as actor_token when exchanging for an on-behalf-of MCP access token.
+   * Configure via AGENT_OAUTH_CLIENT_ID / AGENT_OAUTH_CLIENT_SECRET.
+   */
+  async getAgentClientCredentialsToken() {
+    const clientId = process.env.AGENT_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.AGENT_OAUTH_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      throw new Error('AGENT_OAUTH_CLIENT_ID and AGENT_OAUTH_CLIENT_SECRET must be set for agent actor tokens');
+    }
+    const scope = process.env.AGENT_OAUTH_CLIENT_SCOPES || 'openid';
+    const body = new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope,
+    });
+    try {
+      const response = await axios.post(this.config.tokenEndpoint, body.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      const at = response.data.access_token;
+      if (!at) throw new Error('Client credentials response missing access_token');
+      return at;
+    } catch (error) {
+      console.error('[AgentClientCredentials] Failed:', error.response?.data || error.message);
+      throw new Error(`Agent client credentials failed: ${error.response?.data?.error_description || error.message}`);
+    }
+  }
+
+  /**
    * Get user information from PingOne Core
    */
   async getUserInfo(accessToken) {

@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const configStore = require('../services/configStore');
-const oauthService = require('../services/oauthService');
+const { resolveMcpAccessToken } = require('../services/agentMcpTokenService');
 const {
   MCP_TOOL_SCOPES,
   getMcpServerUrl,
@@ -15,22 +15,9 @@ const {
   mcpCallTool,
 } = require('../services/mcpWebSocketClient');
 
-/**
- * Resolves bearer token for MCP: optional RFC 8693 exchange when MCP resource URI is set.
- */
-async function resolveTokenForMcpTool(req, toolName) {
-  let agentToken = getSessionAccessToken(req);
-  const mcpResourceUri = configStore.getEffective('mcp_resource_uri');
-  if (agentToken && mcpResourceUri) {
-    const toolScopes = MCP_TOOL_SCOPES[toolName] || ['banking:read'];
-    agentToken = await oauthService.performTokenExchange(agentToken, mcpResourceUri, toolScopes);
-  }
-  return agentToken;
-}
-
-/** Discovery uses session token only (no per-tool exchange). */
-function sessionTokenForDiscovery(req) {
-  return getSessionAccessToken(req);
+/** Discovery uses same token resolution as tools/call (scope from a representative tool). */
+async function sessionTokenForDiscovery(req) {
+  return resolveMcpAccessToken(req, 'get_my_accounts');
 }
 
 // GET /api/mcp/inspector/context — architecture + config hints for the demo UI
@@ -106,7 +93,12 @@ router.get('/context', async (req, res) => {
 router.get('/tools', async (req, res) => {
   try {
     await configStore.ensureInitialized();
-    const agentToken = sessionTokenForDiscovery(req);
+    let agentToken;
+    try {
+      agentToken = await sessionTokenForDiscovery(req);
+    } catch (err) {
+      return res.status(502).json({ error: 'token_resolution_failed', message: err.message });
+    }
     if (!agentToken) {
       return res.status(401).json({ error: 'authentication_required', message: 'Sign in to run MCP discovery.' });
     }
@@ -136,7 +128,7 @@ router.post('/invoke', express.json(), async (req, res) => {
     if (!getSessionAccessToken(req)) {
       return res.status(401).json({ error: 'authentication_required', message: 'Sign in to invoke tools.' });
     }
-    const agentToken = await resolveTokenForMcpTool(req, tool);
+    const agentToken = await resolveMcpAccessToken(req, tool);
 
     const started = Date.now();
     const result = await mcpCallTool(tool, params || {}, agentToken);

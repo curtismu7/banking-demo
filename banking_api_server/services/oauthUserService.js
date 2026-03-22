@@ -138,6 +138,32 @@ class OAuthUserService {
   }
 
   /**
+   * Resource Owner Password grant — only if enabled on the PingOne application.
+   * Used to re-validate credentials when binding an agent identity to a human user.
+   */
+  async exchangeResourceOwnerPassword(username, password) {
+    const body = new URLSearchParams({
+      grant_type: 'password',
+      username: String(username).trim(),
+      password: String(password),
+      client_id: this.config.clientId,
+      scope: this.config.scopes.join(' '),
+    });
+    if (this.config.clientSecret) {
+      body.set('client_secret', this.config.clientSecret);
+    }
+    try {
+      const response = await axios.post(this.config.tokenEndpoint, body.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      return response.data;
+    } catch (error) {
+      console.error('[ROPC] Failed:', error.response?.data || error.message);
+      throw new Error(error.response?.data?.error_description || error.message || 'ROPC failed');
+    }
+  }
+
+  /**
    * Get user information from PingOne Core
    */
   async getUserInfo(accessToken) {

@@ -70,6 +70,8 @@ router.get('/', async (req, res) => {
       isConfigured: configStore.isConfigured(),
       storageType:  configStore.getStorageType(),
       readOnly:     configStore.isReadOnly(),
+      /** Vercel: PingOne OAuth clients (admin, customer, worker) are set in deployment env/KV — not collected in this UI. */
+      deploymentManagedPingOneOAuth: !!process.env.VERCEL,
     });
   } catch (err) {
     console.error('[adminConfig] GET error:', err.message);

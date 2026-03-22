@@ -266,9 +266,20 @@ export default function BankingAgent({ user }) {
                     <li><strong>Sign in</strong> — Your browser follows PingOne OAuth (PKCE). Tokens are created at PingOne and stored in the Banking API session, not in localStorage.</li>
                     <li><strong>REST calls</strong> — Buttons below use <code>/api/…</code> routes; the server uses your session to know who you are.</li>
                     <li><strong>MCP</strong> — The MCP server exposes tools (accounts, transfers). The Banking API can call it via WebSocket; tools may use a delegated token (RFC 8693 exchange) scoped for the MCP audience.</li>
+                    <li><strong>Token exchange</strong> — Before each MCP hop, the BFF may call PingOne <code>POST /as/token</code> with <code>grant_type=token-exchange</code> (subject token from your session; optional actor token for &quot;on behalf of&quot;). See <strong>CIBA guide → Token exchange</strong> for before/after, HTTP status, and JSON responses.</li>
                     <li><strong>CIBA</strong> — Optional push approval without a full redirect (see the <strong>CIBA guide</strong> button).</li>
                   </ol>
-                  <p className="banking-agent-learn-hint">Open <strong>CIBA guide → Full stack</strong> for the full diagram and endpoint list.</p>
+                  <p className="banking-agent-learn-hint">Open <strong>CIBA guide → Full stack</strong> for the diagram; <strong>Token exchange</strong> for RFC 8693 details; <strong>Application Configuration</strong> has an MCP Inspector setup wizard.</p>
+                </details>
+                <details className="banking-agent-learn">
+                  <summary>Admin login vs Customer login vs this Agent</summary>
+                  <p className="banking-agent-learn-hint" style={{ marginTop: '0.5rem' }}>
+                    <strong>Admin</strong> and <strong>Customer</strong> on the login page are two different PingOne OAuth apps. Admin goes to <code>/admin</code> (tenant-wide tools). Customer goes to <code>/dashboard</code> (personal accounts).
+                  </p>
+                  <p className="banking-agent-learn-hint">
+                    <strong>This panel</strong> is not a separate login. After you sign in, actions here call <code>POST /api/mcp/tool</code> using <strong>your current session</strong> — same identity as the rest of the app. We know who you are from the server session cookie, not from a different &quot;agent user.&quot;
+                  </p>
+                  <p className="banking-agent-learn-hint">Full comparison: <strong>CIBA guide → Sign-in &amp; roles</strong>.</p>
                 </details>
               </div>
             )}

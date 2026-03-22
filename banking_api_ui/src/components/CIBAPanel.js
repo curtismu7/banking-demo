@@ -7,9 +7,10 @@
  *
  * Tabs:
  *   1. What is CIBA  — explainer with sequence diagram
- *   2. Try It        — initiate a live CIBA request and watch it poll
- *   3. How This App Uses It — MCP agent flow, step-up transactions
- *   4. PingOne Setup — what needs to be configured in the admin console
+ *   2. Sign-in & roles — admin vs customer, where each lands, banking agent vs login
+ *   3. Try It        — initiate a live CIBA request and watch it poll
+ *   4. How This App Uses It — MCP agent flow, step-up transactions
+ *   5. PingOne Setup — what needs to be configured in the admin console
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -157,9 +158,85 @@ MCP / agent:
   POST /api/mcp/tool                      BFF → optional token exchange → MCP tools/call
   GET  /api/mcp/inspector/tools           BFF MCP inspector: tools/list
   POST /api/mcp/inspector/invoke          BFF MCP inspector: tools/call
+Agent identity (optional “on behalf of”):
+  GET  /api/agent/identity/status         Actor bootstrap / mapping status
+  POST /api/agent/identity/bootstrap      Optional ROPC + PingOne user for agent client
 CIBA (when enabled):
   POST /api/auth/ciba/initiate            Start backchannel auth
   GET  /api/auth/ciba/poll/:authReqId     Poll until approved or denied
+`;
+
+/** RFC 8693 token exchange as used by the Banking BFF before MCP calls — see Token exchange tab. */
+const TOKEN_EXCHANGE_EDU = `
+── Where this runs ──
+  The browser never calls PingOne /token for MCP. The Banking API server holds the user’s
+  OAuth tokens in the session and, when a tool needs an MCP-scoped access token, performs
+  RFC 8693 Token Exchange (grant_type=urn:ietf:params:oauth:grant-type:token-exchange)
+  against PingOne’s POST …/as/token endpoint (same host as your issuer).
+
+── BEFORE the token exchange (inputs the BFF already has) ──
+  • Session cookie → identifies the signed-in user (admin or customer).
+  • req.session (server) → access_token / refresh_token / user from the initial OAuth code flow.
+  • Optional “on behalf of” path: USE_AGENT_ACTOR_FOR_MCP=true and MCP resource URI set →
+    the BFF may use subject_token (user) + actor_token (AGENT_OAUTH_CLIENT_* client-credentials
+    token) so PingOne can mint a delegated token (JWT may include an “act” claim per your AS policy).
+
+── THE token request (outbound from BFF to PingOne — not visible in browser DevTools as XHR) ──
+  POST {issuer}/as/token
+  Content-Type: application/x-www-form-urlencoded
+
+  Typical parameters (names may vary slightly by PingOne):
+    grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+    client_id=… & client_secret=…   (or other client auth per your app)
+    subject_token=<user access token from session>
+    subject_token_type=urn:ietf:params:oauth:token-type:access_token
+    audience=<MCP resource / API audience PingOne expects>
+    scope=<space-separated scopes for the MCP layer>
+
+  Optional actor path (delegation):
+    actor_token=<token from agent client credentials>
+    actor_token_type=urn:ietf:params:oauth:token-type:access_token
+    (PingOne policy must allow this exchange.)
+
+── AFTER a successful exchange (what the BFF receives) ──
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+
+  {
+    "access_token": "<JWT or opaque string — MCP/WebSocket uses this as Bearer>",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "scope": "…",
+    "issued_token_type": "urn:ietf:params:oauth:token-type:access_token"
+  }
+
+  The BFF then opens or reuses the WebSocket to banking_mcp_server and sends MCP messages
+  that carry this token (or passes it per your MCP auth binding). Downstream Banking REST
+  calls still use RS audience/scopes as configured.
+
+── API status codes (PingOne /token and BFF wrapping) ──
+  200  OK — body is JSON with access_token (and usually expires_in).
+  400  Bad Request — invalid grant, wrong token type, audience not allowed, malformed request;
+       body often: { "error": "invalid_grant", "error_description": "…" }
+  401  Unauthorized — client authentication failed (wrong client_id/secret or auth method).
+  403  Forbidden — policy or consent blocks the exchange (wording depends on AS).
+  502/503 Bad Gateway — BFF could not reach PingOne (network/DNS); app may return a JSON
+       error from /api/mcp/tool or inspector routes.
+
+── BFF responses YOU may see in the browser (after token exchange succeeds or fails) ──
+  POST /api/mcp/tool — 200 with MCP tool result JSON; 401 if no session or no usable token;
+       5xx if MCP server or PingOne is unreachable.
+  GET /api/mcp/inspector/tools — 200 with tools list; 401 if not authenticated.
+  POST /api/mcp/inspector/invoke — same pattern as tool calls.
+
+── Error JSON shape (OAuth-style, from PingOne through BFF on failure) ──
+  { "error": "invalid_grant" | "invalid_client" | …, "error_description": "human-readable" }
+
+── Mental model ──
+  1) User completes OAuth (authorization code) → session has subject token.
+  2) User invokes MCP tool → BFF may exchange subject token for MCP-audience token (RFC 8693).
+  3) Only after step 2 does the MCP layer see a Bearer suited to the tool/RS chain.
+  Open the Config page → “MCP Inspector setup” for commands and env snippets that match your URL.
 `;
 
 const PINGONE_STEPS = [
@@ -476,7 +553,9 @@ export default function CIBAPanel() {
 
   const tabs = [
     { id: 'what',      label: 'What is CIBA' },
+    { id: 'roles',     label: 'Sign-in & roles' },
     { id: 'fullstack', label: 'Full stack' },
+    { id: 'tokenx',    label: 'Token exchange' },
     { id: 'tryit',     label: '▶ Try It' },
     { id: 'appflow',   label: 'App Flows' },
     { id: 'setup',     label: 'PingOne Setup' },
@@ -513,7 +592,7 @@ export default function CIBAPanel() {
                 : <span className="ciba-badge ciba-badge--off">Disabled</span>}
             </h2>
             <p className="ciba-subtitle">
-              OIDC CIBA plus the full story: OAuth tokens, BFF session, MCP client/server, and API flows — open the <strong>Full stack</strong> tab for the map.
+              OIDC CIBA plus OAuth tokens, BFF session, MCP, and RFC 8693 token exchange — open <strong>Full stack</strong> for the map and <strong>Token exchange</strong> for before/after <code>/token</code>, statuses, and responses.
             </p>
           </div>
           <button className="ciba-close" onClick={() => setOpen(false)} aria-label="Close">✕</button>
@@ -561,6 +640,71 @@ export default function CIBAPanel() {
                 <strong>Chat widget / LangChain:</strong> the embedded chat uses a WebSocket to an agent host; that
                 agent uses its own MCP client to the same MCP server. The flow is parallel to <code>/api/mcp/tool</code> but
                 runs in a different process — both ultimately hit the same MCP tools and Banking API.
+              </div>
+            </div>
+          )}
+
+          {/* ── Token exchange (RFC 8693) — before/after token, HTTP, responses ── */}
+          {activeTab === 'tokenx' && (
+            <div className="ciba-tab-content">
+              <h3 className="ciba-section-title">Token exchange for MCP (RFC 8693)</h3>
+              <p className="ciba-section-desc">
+                This demo keeps OAuth tokens on the <strong>server</strong>. When the MCP layer needs an access token
+                with the right <strong>audience</strong> for tools or delegation, the Banking BFF calls PingOne’s
+                <code> POST …/as/token</code> with <code>grant_type=token-exchange</code>. The panel below lists what happens
+                <em>before</em> and <em>after</em> that call, typical HTTP status codes, and success/error JSON shapes.
+              </p>
+              <CodeBlock>{TOKEN_EXCHANGE_EDU}</CodeBlock>
+              <div className="ciba-notice ciba-notice--info">
+                <strong>Related:</strong> <strong>Sign-in &amp; roles</strong> explains “on behalf of” and{' '}
+                <code>/api/agent/identity/bootstrap</code>. <strong>Application Configuration</strong> includes an{' '}
+                <strong>MCP Inspector setup</strong> wizard that generates env snippets and commands for your URLs.
+              </div>
+            </div>
+          )}
+
+          {/* ── Sign-in, admin vs customer, banking agent ── */}
+          {activeTab === 'roles' && (
+            <div className="ciba-tab-content">
+              <h3 className="ciba-section-title">Two different OAuth sign-ins</h3>
+              <p className="ciba-section-desc">
+                Each button on the login page starts a <em>different</em> authorization flow (admin PingOne app vs end-user app). On <strong>Vercel</strong>, those clients and secrets are <strong>pre-configured on the server</strong> — visitors do not type OAuth credentials in Application Configuration — but <strong>both</strong> Admin and Customer sign-in are still available. On <strong>localhost</strong>, you configure those apps in the Config UI (SQLite).
+              </p>
+              <div className="ciba-cards" style={{ marginBottom: '1rem' }}>
+                <div className="ciba-card">
+                  <div className="ciba-card-icon">👑</div>
+                  <div>
+                    <strong>Admin sign-in</strong> — <code>GET /api/auth/oauth/login</code><br />
+                    Uses the <strong>admin</strong> PingOne application (admin redirect URI). After PingOne returns, the browser is redirected to the <strong>Admin Dashboard</strong> at <code>/admin</code> (or <code>FRONTEND_ADMIN_URL</code> if set). In this demo, <strong>new</strong> users created through this flow get the <strong>admin</strong> role in the local user store.
+                  </div>
+                </div>
+                <div className="ciba-card">
+                  <div className="ciba-card-icon">👤</div>
+                  <div>
+                    <strong>Customer sign-in</strong> — <code>GET /api/auth/oauth/user/login</code><br />
+                    Uses the <strong>end-user</strong> PingOne application (customer redirect URI). After callback, customers go to <strong>Personal Account Dashboard</strong> at <code>/dashboard</code>. New users get the <strong>customer</strong> role and sample accounts. If the same person already exists as <strong>admin</strong> in the demo store, their admin role is preserved.
+                  </div>
+                </div>
+              </div>
+
+              <h3 className="ciba-section-title">What admins can do that customers cannot</h3>
+              <ul className="ciba-flow-list">
+                <li><strong>Admin</strong> (<code>role === &apos;admin&apos;</code>): Activity logs, manage users, view <em>all</em> accounts and transactions, Security Settings (thresholds / PingOne Authorize integration), Application Configuration link, full MCP Inspector. Routed to <code>/admin</code> and admin-only routes.</li>
+                <li><strong>Customer</strong> (<code>role === &apos;customer&apos;</code>): Personal dashboard only — own accounts, deposits, transfers, withdrawals within normal policy; MCP Inspector in read-oriented use; no tenant-wide admin screens.</li>
+              </ul>
+              <p className="ciba-section-desc" style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                The UI chooses the dashboard from <code>GET /api/auth/oauth/status</code> and <code>GET /api/auth/oauth/user/status</code> (admin session is checked first). Your <strong>role</strong> comes from the demo user record after OAuth, not from a separate “role picker.”
+              </p>
+
+              <h3 className="ciba-section-title">Banking Agent (robot button) vs signing in</h3>
+              <p className="ciba-section-desc">
+                The <strong>Banking Agent</strong> panel is <em>not</em> a third identity. It does not log you in by itself. When you <strong>are</strong> signed in, the Agent calls <code>POST /api/mcp/tool</code>; the API server attaches your <strong>current session&apos;s OAuth access token</strong> and forwards MCP tool calls (accounts, transactions, etc.) <strong>as you</strong>. So the Agent is the same user as the browser session — just a different UI (MCP tools) on top of the same BFF session cookie.
+              </p>
+              <p className="ciba-section-desc">
+                When you are <strong>not</strong> signed in, the Agent only offers Configure and the two login buttons — it cannot run banking tools until a session exists.
+              </p>
+              <div className="ciba-notice ciba-notice--info">
+                <strong>How we know who you are:</strong> the server reads <code>req.session.user</code> for the human. For MCP tool calls, the BFF can optionally issue a <strong>delegated token</strong> where the <strong>agent OAuth client</strong> is the actor and you remain the subject (RFC 8693 with <code>actor_token</code> + <code>subject_token</code>) — configure <code>USE_AGENT_ACTOR_FOR_MCP</code>, <code>AGENT_OAUTH_CLIENT_*</code>, and optional PingOne directory provisioning via <code>/api/agent/identity/bootstrap</code>. That is “on behalf of,” not impersonation.
               </div>
             </div>
           )}

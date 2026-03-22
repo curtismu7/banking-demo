@@ -29,6 +29,7 @@ npm-debug.log*
 banking_api_server/data/persistent/config.db
 banking_api_server/data/persistent/config.db-shm
 banking_api_server/data/persistent/config.db-wal
+banking_api_server/data/persistent/agentIdentityMappings.json
 
 # Temporary test scripts
 banking_api_server/_test_*.js
