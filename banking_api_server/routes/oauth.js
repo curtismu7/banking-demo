@@ -4,31 +4,46 @@ const oauthService = require('../services/oauthService');
 const configStore = require('../services/configStore');
 const dataStore = require('../data/store');
 const { determineClientType } = require('../middleware/auth');
+const { getCanonicalPublicOrigin } = require('../services/vercelPublicUrl');
 
 /**
  * Derive the frontend origin for redirect URLs.
  * Priority:
  *   1. configStore frontend_url (set via Config UI)
- *   2. REACT_APP_CLIENT_URL env var (set by run-bank.sh)
- *   3. On Vercel: derive from the incoming request host (works on any Vercel URL)
+ *   2. Canonical public URL: PUBLIC_APP_URL, REACT_APP_CLIENT_URL, or VERCEL_PROJECT_PRODUCTION_URL (see vercelPublicUrl.js)
+ *   3. On Vercel: request host (only if canonical unset — may not match PingOne; prefer step 2)
  *   4. Local dev fallback: http://localhost:3000
  */
 function getOrigin(req) {
-  return configStore.getEffective('frontend_url')
-    || process.env.REACT_APP_CLIENT_URL
-    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000');
+  const fromStore = configStore.getEffective('frontend_url');
+  if (fromStore) return fromStore.replace(/\/+$/, '');
+  const canonical = getCanonicalPublicOrigin();
+  if (canonical) return canonical;
+  if (process.env.VERCEL) {
+    return `${req.protocol}://${req.get('host')}`;
+  }
+  return (process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000').replace(/\/+$/, '');
 }
 
 /**
- * Derive the OAuth redirect URI for the admin flow.
+ * Derive the OAuth redirect URI for the admin flow (must match PingOne exactly).
  * Priority:
- *   1. configStore admin_redirect_uri / PINGONE_CORE_REDIRECT_URI env var (explicit override)
- *   2. On Vercel: derived from request host — works on any Vercel deployment URL automatically
- *   3. Local dev fallback: http://localhost:3001 (server port, not React port)
+ *   1. configStore admin_redirect_uri / PINGONE_CORE_REDIRECT_URI
+ *   2. Canonical origin + /api/auth/oauth/callback (required on Vercel so redirect_uri does not change per deployment)
+ *   3. Local: http://localhost:3001/api/auth/oauth/callback
  */
 function getRedirectUri(req) {
-  return configStore.getEffective('admin_redirect_uri')
-    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}/api/auth/oauth/callback` : 'http://localhost:3001/api/auth/oauth/callback');
+  const fromStore = configStore.getEffective('admin_redirect_uri');
+  if (fromStore) return fromStore;
+  const base = getCanonicalPublicOrigin();
+  if (base) return `${base}/api/auth/oauth/callback`;
+  if (process.env.VERCEL) {
+    console.warn(
+      '[OAuth admin] No PUBLIC_APP_URL / REACT_APP_CLIENT_URL / VERCEL_PROJECT_PRODUCTION_URL; using request host for redirect_uri — add that host to PingOne or set a canonical URL.'
+    );
+    return `${req.protocol}://${req.get('host')}/api/auth/oauth/callback`;
+  }
+  return 'http://localhost:3001/api/auth/oauth/callback';
 }
 
 /**

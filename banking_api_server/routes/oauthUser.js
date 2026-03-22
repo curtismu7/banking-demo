@@ -5,31 +5,38 @@ const configStore = require('../services/configStore');
 const dataStore = require('../data/store');
 const { determineClientType } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
+const { getCanonicalPublicOrigin } = require('../services/vercelPublicUrl');
 
 /**
  * Derive the frontend origin for redirect URLs.
- * Priority:
- *   1. configStore frontend_url (set via Config UI)
- *   2. REACT_APP_CLIENT_URL env var (set by run-bank.sh)
- *   3. On Vercel: derive from the incoming request host
- *   4. Local dev fallback: http://localhost:3000
+ * See routes/oauth.js getOrigin — same rules (PingOne-safe canonical URL on Vercel).
  */
 function getOrigin(req) {
-  return configStore.getEffective('frontend_url')
-    || process.env.REACT_APP_CLIENT_URL
-    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000');
+  const fromStore = configStore.getEffective('frontend_url');
+  if (fromStore) return fromStore.replace(/\/+$/, '');
+  const canonical = getCanonicalPublicOrigin();
+  if (canonical) return canonical;
+  if (process.env.VERCEL) {
+    return `${req.protocol}://${req.get('host')}`;
+  }
+  return (process.env.REACT_APP_CLIENT_URL || 'http://localhost:3000').replace(/\/+$/, '');
 }
 
 /**
- * Derive the OAuth redirect URI for the end-user flow.
- * Priority:
- *   1. configStore user_redirect_uri / PINGONE_CORE_USER_REDIRECT_URI env var (explicit override)
- *   2. On Vercel: derived from request host — works on any Vercel deployment URL automatically
- *   3. Local dev fallback: http://localhost:3001 (server port, not React port)
+ * OAuth redirect URI for end-user flow (must match PingOne exactly).
  */
 function getRedirectUri(req) {
-  return configStore.getEffective('user_redirect_uri')
-    || (process.env.VERCEL ? `${req.protocol}://${req.get('host')}/api/auth/oauth/user/callback` : 'http://localhost:3001/api/auth/oauth/user/callback');
+  const fromStore = configStore.getEffective('user_redirect_uri');
+  if (fromStore) return fromStore;
+  const base = getCanonicalPublicOrigin();
+  if (base) return `${base}/api/auth/oauth/user/callback`;
+  if (process.env.VERCEL) {
+    console.warn(
+      '[OAuth user] No canonical public URL; using request host for redirect_uri — set PUBLIC_APP_URL or REACT_APP_CLIENT_URL or enable VERCEL_PROJECT_PRODUCTION_URL.'
+    );
+    return `${req.protocol}://${req.get('host')}/api/auth/oauth/user/callback`;
+  }
+  return 'http://localhost:3001/api/auth/oauth/user/callback';
 }
 
 /**
