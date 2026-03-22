@@ -563,7 +563,8 @@ const authenticateToken = async (req, res, next) => {
           const clientType = determineClientType(sessionTokenExtracted);
           const scopes = parseTokenScopes(sessionTokenExtracted, requestContext);
           const userType = determineUserTypeFromToken(decoded);
-          const adminClientId = process.env.PINGONE_ADMIN_CLIENT_ID || process.env.VITE_PINGONE_CLIENT_ID;
+          // Same client id as authorize flow (configStore: PINGONE_CORE_CLIENT_ID, PINGONE_ADMIN_CLIENT_ID, …)
+          const adminClientId = String(oauthConfig.clientId || '').trim();
           const tokenClientId = decoded.azp || decoded.client_id;
           const isAdminClient = adminClientId && tokenClientId && tokenClientId === adminClientId;
           const su = req.session?.user;
@@ -661,7 +662,7 @@ const authenticateToken = async (req, res, next) => {
       // Grant admin role if:
       //  1. The token was issued to the admin client (azp/client_id claim matches), OR
       //  2. The session already has this user recorded as admin (enrichment from OAuth callback)
-      const adminClientId = process.env.PINGONE_ADMIN_CLIENT_ID || process.env.VITE_PINGONE_CLIENT_ID;
+      const adminClientId = String(oauthConfig.clientId || '').trim();
       const tokenClientId = decoded.azp || decoded.client_id;
       const isAdminClient = adminClientId && tokenClientId && tokenClientId === adminClientId;
       const su = req.session?.user;
