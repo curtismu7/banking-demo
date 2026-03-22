@@ -1,5 +1,6 @@
-# Banking App — Lucidchart Diagrams
-# Import: Extensions → Import → Mermaid Diagram (paste one block at a time)
+# Banking App — Architecture diagrams (Mermaid)
+
+Source of truth for the diagrams below. Open in **diagrams.net (draw.io)** with your Mermaid extension and paste **one** fenced block at a time.
 
 ---
 

@@ -144,8 +144,8 @@ async function createSampleDataForCustomer(userId, firstName, lastName) {
  */
 router.get('/login', (req, res) => {
   try {
-    // Guard: redirect to config if PingOne credentials are not set
-    if (!configStore.isConfigured()) {
+    // Guard: end-user flow needs user client + env (not admin_client_id)
+    if (!configStore.isUserOAuthConfigured()) {
       return res.redirect(`${getOrigin(req)}/config?error=not_configured`);
     }
 

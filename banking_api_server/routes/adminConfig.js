@@ -12,8 +12,9 @@
  * Security model:
  *  • GET is open (returns masked data — no secret exposure).
  *  • POST is open when no config is stored yet (first-run setup).
- *  • POST is restricted to admin OAuth session once config exists.
- *  • Reset always requires admin session.
+ *  • POST is restricted to admin OAuth session once config exists (or X-Config-Password on Vercel).
+ *  • On Vercel without KV, POST/reset return 403 (env-only); with KV, writes go to Upstash.
+ *  • Reset uses the same gate as POST; on Vercel prefer ADMIN_CONFIG_PASSWORD for auth.
  */
 
 const express = require('express');
@@ -81,10 +82,11 @@ router.get('/', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 router.post('/', requireAdminOrUnconfigured, async (req, res) => {
-  if (process.env.VERCEL) {
+  if (process.env.VERCEL && !configStore.hasKvStorage()) {
     return res.status(403).json({
       error:   'read_only',
-      message: 'Configuration is managed by environment variables in this deployment and cannot be changed at runtime.',
+      message:
+        'This deployment has no Vercel KV / Upstash connection. Set KV_REST_API_URL and KV_REST_API_TOKEN (or use the Vercel KV integration), or manage PingOne settings via environment variables only.',
     });
   }
   try {
@@ -168,17 +170,16 @@ router.post('/test', async (req, res) => {
 // POST /api/admin/config/reset  — wipe all stored config (admin only)
 // ---------------------------------------------------------------------------
 
-router.post('/reset', async (req, res) => {
-  if (process.env.VERCEL) {
+router.post('/reset', requireAdminOrUnconfigured, async (req, res) => {
+  if (process.env.VERCEL && !configStore.hasKvStorage()) {
     return res.status(403).json({
       error:   'read_only',
-      message: 'Configuration is managed by environment variables in this deployment.',
+      message:
+        'This deployment has no KV store. Reset is only available when KV_REST_API_URL and KV_REST_API_TOKEN are configured.',
     });
   }
-  if (!isAdminSession(req)) {
-    return res.status(401).json({ error: 'unauthorized', message: 'Admin session required.' });
-  }
   try {
+    await configStore.ensureInitialized();
     await configStore.resetConfig();
     res.json({ ok: true, message: 'Configuration cleared.' });
   } catch (err) {

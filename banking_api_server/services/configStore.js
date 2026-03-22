@@ -2,7 +2,8 @@
  * ConfigStore — persists app configuration across server/browser restarts.
  *
  * Local (no KV_REST_API_URL):  SQLite via better-sqlite3  →  data/config.db
- * Vercel (KV_REST_API_URL set): @vercel/kv (Upstash Redis) →  banking:config hash
+ * Vercel + KV (KV_REST_API_URL set): @vercel/kv (Upstash Redis) → banking:config hash;
+ *   runtime Config UI persists here (SaaS). Vercel without KV: env vars only (read-only UI).
  *
  * Secrets (clientSecret, sessionSecret) are encrypted with AES-256-GCM before
  * being written to storage, using a key derived from CONFIG_ENCRYPTION_KEY or
@@ -213,11 +214,11 @@ class ConfigStore {
    * Accepts partial updates — only sets keys that are provided and non-empty.
    * Secrets are encrypted before writing to storage.
    *
-   * On Vercel, configuration is managed via environment variables and cannot
-   * be changed at runtime — this method is a no-op in that environment.
+   * On Vercel without KV, env vars are the only store — this is a no-op.
+   * On Vercel with KV (or local SQLite), values are persisted.
    */
   async setConfig(data) {
-    if (process.env.VERCEL) return; // read-only in Vercel deployments
+    if (process.env.VERCEL && !USE_KV) return;
     await this.ensureInitialized();
 
     const updates = {};        // what goes into storage (encrypted secrets)
@@ -264,11 +265,11 @@ class ConfigStore {
     const result = {};
     for (const key of Object.keys(FIELD_DEFS)) {
       if (SECRET_KEYS.has(key)) {
-        const isSet = !!(this._cache[key]);
-        result[key]          = isSet ? '••••••••' : '';
+        const isSet = String(this.getEffective(key) || '').trim() !== '';
+        result[key] = isSet ? '••••••••' : '';
         result[`${key}_set`] = isSet;
       } else {
-        result[key] = this._cache[key] || '';
+        result[key] = this.getEffective(key) || '';
       }
     }
     return result;
@@ -276,14 +277,12 @@ class ConfigStore {
 
   /**
    * Returns the effective value for a key:
-   * - On Vercel: env vars only (config store is read-only, env vars are authoritative)
-   * - Locally: configStore cache → relevant process.env fallbacks → field default.
+   * - With persisted store (SQLite or KV): cache first, then env fallbacks, then default.
+   * - On Vercel without KV: env vars only (no runtime persistence).
    * This is what config/oauth.js getters call.
    */
   getEffective(key) {
-    // On Vercel, always read from environment variables — the stored config is ignored
-    // so that the Vercel-managed env vars are always authoritative.
-    if (!process.env.VERCEL) {
+    if (!process.env.VERCEL || USE_KV) {
       const stored = this.get(key);
       if (stored) return stored;
     }
@@ -316,9 +315,14 @@ class ConfigStore {
     return FIELD_DEFS[key]?.default || '';
   }
 
-  /** True when config cannot be changed at runtime (Vercel deployments). */
+  /** True when config cannot be changed at runtime (Vercel without KV). */
   isReadOnly() {
-    return !!process.env.VERCEL;
+    return !!process.env.VERCEL && !USE_KV;
+  }
+
+  /** True when KV/Upstash is wired — SaaS-style persistence on Vercel. */
+  hasKvStorage() {
+    return USE_KV;
   }
 
   /** 'vercel-kv', 'upstash-direct', or 'sqlite' */
@@ -327,14 +331,27 @@ class ConfigStore {
     return 'sqlite';
   }
 
-  /** True once the minimum required fields are stored. */
+  /**
+   * True once admin PingOne OAuth can run.
+   * Uses getEffective (same as config/oauth.js) so on Vercel this matches env vars,
+   * not KV cache alone — avoids redirecting to PingOne with empty client_id or //as path.
+   */
   isConfigured() {
-    return !!(this.get('pingone_environment_id') && this.get('admin_client_id'));
+    const envId = String(this.getEffective('pingone_environment_id') || '').trim();
+    const adminId = String(this.getEffective('admin_client_id') || '').trim();
+    return !!(envId && adminId);
   }
 
-  /** Reset only works if called with correct SESSION_SECRET (basic safety). */
+  /** True when end-user OAuth (user_client_id) + environment id are present. */
+  isUserOAuthConfigured() {
+    const envId = String(this.getEffective('pingone_environment_id') || '').trim();
+    const userId = String(this.getEffective('user_client_id') || '').trim();
+    return !!(envId && userId);
+  }
+
+  /** Wipe stored config (KV or SQLite). No-op on Vercel without KV. */
   async resetConfig() {
-    if (process.env.VERCEL) return; // read-only in Vercel deployments
+    if (process.env.VERCEL && !USE_KV) return;
     if (USE_KV) {
       const { createClient } = require('@vercel/kv');
       const kv = createClient({ url: KV_URL, token: KV_TOKEN });

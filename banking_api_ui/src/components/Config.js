@@ -309,8 +309,7 @@ export default function Config() {
             marginBottom: '1.5rem',
             color: '#1e40af',
           }}>
-            <strong>🔒 Read-only mode:</strong> Configuration is managed by environment variables in this deployment.
-            Contact your administrator to change these settings.
+            <strong>Read-only mode:</strong> This server has no KV database attached, so settings must come from environment variables (or connect Vercel KV / Upstash and redeploy). Local development without this restriction uses SQLite and can save here.
           </div>
         )}
 
