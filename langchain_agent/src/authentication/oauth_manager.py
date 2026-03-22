@@ -3,6 +3,7 @@ OAuth authentication manager implementation for PingOne Advanced Identity Cloud 
 """
 import asyncio
 import json
+import os
 import secrets
 import string
 from datetime import datetime, timezone, timedelta
@@ -292,16 +293,21 @@ class TokenManager:
         if client_credentials.is_expired():
             raise ValueError("Client credentials are expired")
         
-        # Build scope string with additional scopes
-        scopes = [self.config.pingone.default_scope]
-        if additional_scopes:
-            scopes.extend(additional_scopes)
+        # Build scope string — client_credentials tokens should not include openid (OIDC user scopes).
+        # Only include explicitly requested additional_scopes (e.g., ai_agent).
+        scopes = list(additional_scopes) if additional_scopes else []
         scope_string = " ".join(scopes)
-        
-        token_data = {
+
+        token_data: Dict[str, str] = {
             "grant_type": "client_credentials",
-            "scope": scope_string
         }
+        if scope_string:
+            token_data["scope"] = scope_string
+        # Add resource indicator for audience binding when MCP_SERVER_RESOURCE_URI is configured
+        mcp_resource_uri = os.environ.get('MCP_SERVER_RESOURCE_URI')
+        if mcp_resource_uri:
+            token_data["resource"] = mcp_resource_uri
+            logger.info(f"Agent token request includes resource indicator: {mcp_resource_uri}")
         
         # Use HTTP Basic authentication with client credentials
         auth = aiohttp.BasicAuth(
@@ -418,11 +424,10 @@ class TokenManager:
             aiohttp.ClientError: If token acquisition fails
             ValueError: If credentials are expired or response is invalid
         """
-        # Build scope key for cache validation
-        scopes = [self.config.pingone.default_scope]
-        if additional_scopes:
-            scopes.extend(additional_scopes)
-        scope_key = " ".join(sorted(scopes))
+        # Build scope key — client_credentials tokens should not include openid (OIDC user scopes).
+        # Use only explicitly requested additional_scopes (e.g., ai_agent).
+        scopes = list(additional_scopes) if additional_scopes else []
+        scope_key = " ".join(sorted(scopes)) if scopes else ''
         
         # Check if we have a current token and if it's still valid
         if (self._current_token and 

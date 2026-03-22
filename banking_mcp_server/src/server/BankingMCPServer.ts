@@ -191,6 +191,16 @@ export class BankingMCPServer extends EventEmitter {
         return;
       }
 
+      // Zero-trust: extract agent token from Authorization header if present (preferred over params)
+      const authHeader = (request?.headers?.authorization || request?.headers?.Authorization) as string | undefined;
+      if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+        const bearerToken = authHeader.slice(7).trim();
+        if (bearerToken) {
+          connectionInfo.agentToken = bearerToken;
+          console.log(`[BankingMCPServer] Agent token pre-authorized via Authorization header for connection ${connectionId}`);
+        }
+      }
+
       // Store connection
       this.connections.set(connectionId, connectionInfo);
       this.stats.totalConnections++;

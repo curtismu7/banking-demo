@@ -85,6 +85,24 @@ export class TokenIntrospector {
       );
     }
 
+    // Zero-trust: validate token audience matches this MCP server's resource URI
+    const resourceUri = process.env.MCP_SERVER_RESOURCE_URI;
+    if (resourceUri && tokenInfo.aud) {
+      const audStr = String(tokenInfo.aud);
+      // aud may be a space-separated list or a single value
+      const audList = audStr.includes(' ') ? audStr.split(' ') : [audStr];
+      if (!audList.includes(resourceUri)) {
+        console.error(`[TokenIntrospector] Audience mismatch: token aud=${audStr}, expected ${resourceUri}`);
+        throw new AuthenticationError(
+          'Token audience does not match MCP server resource URI',
+          AuthErrorCodes.INVALID_AGENT_TOKEN
+        );
+      }
+      console.log(`[TokenIntrospector] Token audience validated against resource URI: ${resourceUri}`);
+    } else if (resourceUri && !tokenInfo.aud) {
+      console.warn(`[TokenIntrospector] MCP_SERVER_RESOURCE_URI is set but token has no aud claim — skipping aud check`);
+    }
+
     // Check if token is expired
     if (tokenInfo.exp && tokenInfo.exp < Math.floor(Date.now() / 1000)) {
       throw new AuthenticationError(

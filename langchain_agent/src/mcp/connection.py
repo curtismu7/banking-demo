@@ -45,6 +45,7 @@ class MCPConnection(MCPClient):
         self._available_tools: List[str] = []
         self._tool_schemas: Dict[str, Dict[str, Any]] = {}
         self._connection_lock = asyncio.Lock()
+        self._agent_token: Optional[str] = None  # Used as Authorization header on (re)connect
         
         logger.info(f"Initialized MCP connection for server: {server_config.name}")
     
@@ -77,9 +78,13 @@ class MCPConnection(MCPClient):
                 try:
                     logger.info(f"Connecting to MCP server {server_config.name} (attempt {self._retry_count + 1})")
                     
-                    # Connect to WebSocket endpoint
+                    # Connect to WebSocket endpoint — pass Authorization header if agent token available
+                    _ws_kwargs: Dict[str, Any] = {}
+                    if self._agent_token:
+                        _ws_kwargs['extra_headers'] = [('Authorization', f'Bearer {self._agent_token}')]
+                        logger.debug(f"Connecting to {server_config.name} with Authorization header")
                     self._websocket = await asyncio.wait_for(
-                        websockets.connect(server_config.endpoint),
+                        websockets.connect(server_config.endpoint, **_ws_kwargs),
                         timeout=self.connection_timeout
                     )
                     
@@ -134,19 +139,28 @@ class MCPConnection(MCPClient):
         """Execute a tool call on the MCP server using JSON-RPC 2.0 format"""
         if not self.is_connected:
             await self._ensure_connected()
-        
+
+        # Zero-trust: move agent token to Authorization header rather than JSON-RPC params.
+        # Reconnect with the header when the token changes (first call, or after token refresh).
+        if tool_call.agent_token:
+            new_token = tool_call.agent_token.token
+            if new_token != self._agent_token:
+                logger.info(f"Agent token changed — reconnecting to {self.server_config.name} with Authorization header")
+                self._agent_token = new_token
+                if self.is_connected:
+                    await self.disconnect()
+                await self._ensure_connected()
+
         try:
             # Prepare tool call message using JSON-RPC 2.0 format
             params = {
                 "name": tool_call.tool_name,
                 "arguments": tool_call.parameters
             }
-            
-            # Include agent token if available
-            if tool_call.agent_token:
-                params["agentToken"] = tool_call.agent_token.token
-                logger.debug(f"Including agent token in request")
-            
+
+            # agentToken is now passed as the Authorization header at WebSocket connect time
+            # (see self._agent_token / _ws_kwargs in connect()). Do not include in params.
+
             # Include user auth code if available
             if tool_call.user_auth_code:
                 params["userAuthCode"] = tool_call.user_auth_code.code
