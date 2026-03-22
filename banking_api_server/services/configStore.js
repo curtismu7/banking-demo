@@ -287,16 +287,44 @@ class ConfigStore {
       if (stored) return stored;
     }
 
-    // Env-var fallback map (handles legacy PINGONE_CORE_ naming)
+    // Env-var fallback map (PINGONE_CORE_* / PINGONE_AI_CORE_* / PINGONE_ADMIN_* all refer to the same PingOne apps)
     const envFallbackMap = {
       pingone_environment_id: ['PINGONE_ENVIRONMENT_ID'],
       pingone_region:         ['PINGONE_REGION'],
-      admin_client_id:        ['PINGONE_CORE_CLIENT_ID', 'PINGONE_ADMIN_CLIENT_ID', 'VITE_PINGONE_CLIENT_ID'],
-      admin_client_secret:    ['PINGONE_CORE_CLIENT_SECRET', 'PINGONE_ADMIN_CLIENT_SECRET', 'VITE_PINGONE_CLIENT_SECRET'],
-      admin_redirect_uri:     ['PINGONE_CORE_REDIRECT_URI', 'PINGONE_ADMIN_REDIRECT_URI'],
-      user_client_id:         ['PINGONE_CORE_USER_CLIENT_ID', 'PINGONE_USER_CLIENT_ID', 'VITE_PINGONE_CLIENT_ID'],
-      user_client_secret:     ['PINGONE_CORE_USER_CLIENT_SECRET', 'PINGONE_USER_CLIENT_SECRET', 'VITE_PINGONE_CLIENT_SECRET'],
-      user_redirect_uri:      ['PINGONE_CORE_USER_REDIRECT_URI', 'PINGONE_USER_REDIRECT_URI'],
+      admin_client_id:        [
+        'PINGONE_AI_CORE_CLIENT_ID',
+        'PINGONE_CORE_CLIENT_ID',
+        'PINGONE_ADMIN_CLIENT_ID',
+        'VITE_PINGONE_CLIENT_ID',
+      ],
+      admin_client_secret:    [
+        'PINGONE_AI_CORE_CLIENT_SECRET',
+        'PINGONE_CORE_CLIENT_SECRET',
+        'PINGONE_ADMIN_CLIENT_SECRET',
+        'VITE_PINGONE_CLIENT_SECRET',
+      ],
+      admin_redirect_uri:     [
+        'PINGONE_AI_CORE_REDIRECT_URI',
+        'PINGONE_CORE_REDIRECT_URI',
+        'PINGONE_ADMIN_REDIRECT_URI',
+      ],
+      user_client_id:         [
+        'PINGONE_AI_CORE_USER_CLIENT_ID',
+        'PINGONE_CORE_USER_CLIENT_ID',
+        'PINGONE_USER_CLIENT_ID',
+        'VITE_PINGONE_CLIENT_ID',
+      ],
+      user_client_secret:     [
+        'PINGONE_AI_CORE_USER_CLIENT_SECRET',
+        'PINGONE_CORE_USER_CLIENT_SECRET',
+        'PINGONE_USER_CLIENT_SECRET',
+        'VITE_PINGONE_CLIENT_SECRET',
+      ],
+      user_redirect_uri:      [
+        'PINGONE_AI_CORE_USER_REDIRECT_URI',
+        'PINGONE_CORE_USER_REDIRECT_URI',
+        'PINGONE_USER_REDIRECT_URI',
+      ],
       admin_role:             ['ADMIN_ROLE'],
       user_role:              ['USER_ROLE'],
       session_secret:         ['SESSION_SECRET'],

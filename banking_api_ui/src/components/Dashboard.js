@@ -13,6 +13,7 @@ const Dashboard = ({ user, onLogout }) => {
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [forbidden403, setForbidden403] = useState(false);
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenData, setTokenData] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -46,14 +47,18 @@ const Dashboard = ({ user, onLogout }) => {
 
       setStats(statsResponse.data.stats);
       setRecentActivity(activityResponse.data.logs);
+      setForbidden403(false);
     } catch (error) {
       console.error('Dashboard error:', error);
       
       if (error.response?.status === 401) {
+        setForbidden403(false);
         setError('Your session has expired. Please log in again.');
       } else if (error.response?.status === 403) {
+        setForbidden403(true);
         setError('You do not have permission to access the admin dashboard.');
       } else {
+        setForbidden403(false);
         setError('Failed to load dashboard data');
       }
     } finally {
@@ -145,8 +150,33 @@ const Dashboard = ({ user, onLogout }) => {
 
   if (error) {
     return (
-      <div className="alert alert-error">
-        {error}
+      <div style={{ maxWidth: '640px', margin: '2rem auto', padding: '0 1rem' }}>
+        <div className="alert alert-error">{error}</div>
+        {forbidden403 && (
+          <div style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#374151', lineHeight: 1.5 }}>
+            <p style={{ marginTop: 0 }}>
+              The API rejected this request. Common causes: the access token was issued to the <strong>end-user</strong> PingOne
+              app but the admin dashboard requires the <strong>admin</strong> app; or Vercel env vars
+              (<code>PINGONE_ENVIRONMENT_ID</code>, admin client id/secret, redirect URIs) do not match the PingOne app
+              that issued the token.
+            </p>
+            <p>
+              <strong>Shared Vercel URL:</strong> everyone uses the same env vars in the Vercel project — set{' '}
+              <code>PINGONE_AI_CORE_CLIENT_ID</code> (or <code>PINGONE_CORE_CLIENT_ID</code>) to your <strong>admin</strong> PingOne
+              application ID, and register this site&apos;s redirect URIs in that app.
+            </p>
+            <p>
+              <strong>Serverless:</strong> set <code>REDIS_URL</code> (or Vercel KV) so OAuth session/state survives across
+              instances — otherwise <strong>Admin Sign in</strong> may fail before you reach PingOne.
+            </p>
+            <p style={{ marginBottom: 0 }}>
+              <button type="button" className="btn btn-primary" onClick={onLogout}>
+                Sign out
+              </button>
+              <span style={{ marginLeft: '0.5rem' }}>then open <strong>Admin Sign in</strong> again on the login page.</span>
+            </p>
+          </div>
+        )}
       </div>
     );
   }
