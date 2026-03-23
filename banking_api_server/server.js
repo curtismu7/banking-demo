@@ -14,6 +14,30 @@ const session = require('express-session');
 
 const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
 
+// ── Optional persistent session store (required for Vercel / multi-instance deployments) ──
+let sessionStore;
+if (process.env.REDIS_URL) {
+  try {
+    const RedisStore = require('connect-redis').default || require('connect-redis');
+    const { createClient } = require('redis');
+    const redisClient = createClient({ url: process.env.REDIS_URL, socket: { tls: process.env.REDIS_URL.startsWith('rediss://') } });
+    redisClient.connect().catch((err) => console.error('[session-store] Redis connect error:', err.message));
+    redisClient.on('error', (err) => console.error('[session-store] Redis error:', err.message));
+    sessionStore = new RedisStore({ client: redisClient, prefix: 'banking:sess:' });
+    console.log('[session-store] Using Redis store (REDIS_URL)');
+  } catch (err) {
+    console.warn('[session-store] connect-redis/redis not available, falling back to memory store:', err.message);
+  }
+}
+
+if (!sessionStore && process.env.VERCEL) {
+  console.warn(
+    '[session-store] WARNING: Running on Vercel without REDIS_URL. ' +
+    'Sessions will not persist across serverless invocations — OAuth login will fail. ' +
+    'Set REDIS_URL (Upstash Redis recommended: https://upstash.com) in Vercel dashboard.',
+  );
+}
+
 // Import routes
 const authRoutes        = require('./routes/auth');
 const oauthRoutes       = require('./routes/oauth');
@@ -71,9 +95,20 @@ app.use(morgan('combined'));
 
 // Session middleware
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-session-secret-change-in-production',
+  secret: (() => {
+    const s = process.env.SESSION_SECRET;
+    if (!s || s === 'dev-session-secret-change-in-production') {
+      if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+        console.error('[FATAL] SESSION_SECRET env var is not set or is using the insecure default. Set a random 32+ character string in your deployment environment.');
+        process.exit(1);
+      }
+      console.warn('[security] SESSION_SECRET not set — using insecure default (dev only).');
+    }
+    return s || 'dev-session-secret-change-in-production';
+  })(),
   resave: false,
   saveUninitialized: false,
+  ...(sessionStore ? { store: sessionStore } : {}),
   cookie: {
     // On Vercel / production HTTPS, secure:true is required.
     // SameSite:none is required on Vercel because the OAuth signoff redirect
@@ -308,8 +343,10 @@ app.use(oauthErrorHandler);
 app.use((err, req, res, next) => {
   console.error('Error occurred for path:', req.path);
   console.error('Error details:', err.message);
-  console.error('Full stack:', err.stack);
-  res.status(500).json({ 
+  if (process.env.NODE_ENV !== 'production') {
+    console.error('Full stack:', err.stack);
+  }
+  res.status(500).json({
     error: 'internal_server_error',
     error_description: 'An internal server error occurred',
     timestamp: new Date().toISOString(),
