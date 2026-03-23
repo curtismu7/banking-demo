@@ -7,6 +7,8 @@ const { determineClientType } = require('../middleware/auth');
 const {
   getFrontendOrigin,
   getAdminRedirectUri,
+  validateRedirectUriOrigin,
+  getExpectedFrontendOrigin,
 } = require('../services/oauthRedirectUris');
 
 /**
@@ -40,12 +42,23 @@ router.get('/login', (req, res) => {
     // Generate PKCE code_verifier and store in session
     const codeVerifier = oauthService.generateCodeVerifier();
     const redirectUri = getAdminRedirectUri(req);
+
+    // Validate redirect_uri domain matches the expected deployment origin
+    const uriCheck = validateRedirectUriOrigin(redirectUri);
+    if (!uriCheck.ok) {
+      console.warn('[oauth] Redirect URI rejected:', uriCheck.reason, redirectUri);
+      return res.status(400).json({ error: 'invalid_redirect_uri', message: uriCheck.reason });
+    }
+
     req.session.oauthState = state;
     req.session.oauthCodeVerifier = codeVerifier;
     req.session.oauthRedirectUri = redirectUri;
 
     // Generate authorization URL (includes code_challenge derived from verifier)
-    const authUrl = oauthService.generateAuthorizationUrl(state, codeVerifier, redirectUri);
+    const resourceParam = process.env.ENDUSER_AUDIENCE
+      ? `&resource=${encodeURIComponent(process.env.ENDUSER_AUDIENCE)}`
+      : '';
+    const authUrl = oauthService.generateAuthorizationUrl(state, codeVerifier, redirectUri) + resourceParam;
 
     // Redirect to PingOne
     res.redirect(authUrl);
@@ -62,6 +75,17 @@ router.get('/login', (req, res) => {
 router.get('/callback', async (req, res) => {
   try {
     const { code, state, error } = req.query;
+
+    // Validate the request origin matches our expected deployment (defence-in-depth)
+    if (process.env.VERCEL) {
+      const referer = req.get('referer') || req.get('origin') || '';
+      const expectedOrigin = getExpectedFrontendOrigin(req);
+      if (referer && !referer.startsWith(expectedOrigin) && !referer.startsWith('https://auth.pingone')) {
+        console.warn('[oauth/callback] Unexpected referer:', referer, '— expected:', expectedOrigin);
+        // Log but don't block — PingOne already validates; this is observability only
+        // If you want to harden further, change the console.warn to a return res.redirect error
+      }
+    }
 
     // Check for OAuth errors
     if (error) {

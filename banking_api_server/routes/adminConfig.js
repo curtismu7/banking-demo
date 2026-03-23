@@ -20,10 +20,21 @@
 const express = require('express');
 const axios   = require('axios');
 const router  = express.Router();
+const rateLimit = require('express-rate-limit');
 const configStore = require('../services/configStore');
 const { FIELD_DEFS, SECRET_KEYS } = require('../services/configStore');
 const { getOAuthRedirectDebugInfo } = require('../services/oauthRedirectUris');
 const { blockInDemoMode } = require('../middleware/demoMode');
+
+// Stricter rate limit for config reads — prevents enumeration/recon on shared deployments
+const configReadLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minute window
+  max: 20,               // 20 reads per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'too_many_requests', message: 'Too many config requests. Please wait a minute.' },
+  skip: (req) => req.session?.isAdmin || req.session?.oauthUser?.role === 'admin', // skip for authenticated admins
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,7 +75,7 @@ function requireAdminOrUnconfigured(req, res, next) {
 // GET /api/admin/config
 // ---------------------------------------------------------------------------
 
-router.get('/', async (req, res) => {
+router.get('/', configReadLimiter, async (req, res) => {
   try {
     await configStore.ensureInitialized();
     let redirectInfo = null;

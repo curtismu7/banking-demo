@@ -6,7 +6,8 @@
       "NODE_VERSION": "20",
       "CI": "false",
       "GENERATE_SOURCEMAP": "false",
-      "DEMO_MODE": "true"
+      "DEMO_MODE": "true",
+      "CORS_ORIGIN": "https://banking-demo-puce.vercel.app"
     }
   },
 

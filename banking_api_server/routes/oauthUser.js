@@ -5,7 +5,7 @@ const configStore = require('../services/configStore');
 const dataStore = require('../data/store');
 const { determineClientType } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
-const { getFrontendOrigin, getUserRedirectUri } = require('../services/oauthRedirectUris');
+const { getFrontendOrigin, getUserRedirectUri, validateRedirectUriOrigin, getExpectedFrontendOrigin } = require('../services/oauthRedirectUris');
 
 /**
  * Create sample accounts and transactions for new customers
@@ -120,14 +120,25 @@ router.get('/login', (req, res) => {
     const state = oauthService.generateState();
     const codeVerifier = oauthService.generateCodeVerifier();
     const redirectUri = getUserRedirectUri(req);
-    const url = oauthService.generateAuthorizationUrl(state, codeVerifier, {}, redirectUri);
+
+    // Validate redirect_uri domain matches the expected deployment origin
+    const uriCheck = validateRedirectUriOrigin(redirectUri);
+    if (!uriCheck.ok) {
+      console.warn('[oauth/user] Redirect URI rejected:', uriCheck.reason, redirectUri);
+      return res.status(400).json({ error: 'invalid_redirect_uri', message: uriCheck.reason });
+    }
+
+    const resourceParam = process.env.ENDUSER_AUDIENCE
+      ? `&resource=${encodeURIComponent(process.env.ENDUSER_AUDIENCE)}`
+      : '';
+    const url = oauthService.generateAuthorizationUrl(state, codeVerifier, {}, redirectUri) + resourceParam;
 
     // Store state, verifier and redirect URI in session for CSRF protection and PKCE
     req.session.oauthState = state;
     req.session.oauthCodeVerifier = codeVerifier;
     req.session.oauthRedirectUri = redirectUri;
     req.session.oauthType = 'user'; // Distinguish from admin OAuth
-    
+
     console.log('Redirecting end user to PingOne Core:', url);
     res.redirect(url);
   } catch (error) {
@@ -142,7 +153,18 @@ router.get('/login', (req, res) => {
 router.get('/callback', async (req, res) => {
   try {
     const { code, state, error } = req.query;
-    
+
+    // Validate the request origin matches our expected deployment (defence-in-depth)
+    if (process.env.VERCEL) {
+      const referer = req.get('referer') || req.get('origin') || '';
+      const expectedOrigin = getExpectedFrontendOrigin(req);
+      if (referer && !referer.startsWith(expectedOrigin) && !referer.startsWith('https://auth.pingone')) {
+        console.warn('[oauth/user/callback] Unexpected referer:', referer, '— expected:', expectedOrigin);
+        // Log but don't block — PingOne already validates; this is observability only
+        // If you want to harden further, change the console.warn to a return res.redirect error
+      }
+    }
+
     // Check for OAuth errors
     if (error) {
       console.error('OAuth error:', error);
