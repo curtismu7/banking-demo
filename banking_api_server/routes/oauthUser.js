@@ -155,7 +155,8 @@ router.get('/callback', async (req, res) => {
     const { code, state, error } = req.query;
 
     // Validate the request origin matches our expected deployment (defence-in-depth)
-    if (process.env.VERCEL) {
+    const isProdDeployment = process.env.VERCEL || process.env.REPL_ID || process.env.REPLIT_DEPLOYMENT;
+    if (isProdDeployment) {
       const referer = req.get('referer') || req.get('origin') || '';
       const expectedOrigin = getExpectedFrontendOrigin(req);
       if (referer && !referer.startsWith(expectedOrigin) && !referer.startsWith('https://auth.pingone')) {

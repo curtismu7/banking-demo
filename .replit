@@ -1,0 +1,22 @@
+# Replit deployment configuration for Banking Demo
+run = "cd banking_api_server && node server.js"
+entrypoint = "banking_api_server/server.js"
+
+[env]
+NODE_ENV = "production"
+PORT = "3001"
+
+[nix]
+channel = "stable-23_11"
+
+[deployment]
+run = ["sh", "-c", "cd banking_api_server && node server.js"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 3001
+externalPort = 80
+
+[[ports]]
+localPort = 3000
+externalPort = 3000

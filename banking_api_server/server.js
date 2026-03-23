@@ -12,7 +12,14 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const session = require('express-session');
 
-const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+const isVercel  = !!process.env.VERCEL;
+const isReplit  = !!process.env.REPL_ID || !!process.env.REPLIT_DEPLOYMENT;
+const isProduction = process.env.NODE_ENV === 'production' || isVercel || isReplit;
+
+// Log deployment context on startup
+if (isVercel)  console.log('[platform] Vercel deployment detected');
+if (isReplit)  console.log('[platform] Replit deployment detected');
+if (!isVercel && !isReplit && isProduction) console.log('[platform] Generic production deployment');
 
 // ── Optional persistent session store (required for Vercel / multi-instance deployments) ──
 let sessionStore;
@@ -30,11 +37,12 @@ if (process.env.REDIS_URL) {
   }
 }
 
-if (!sessionStore && process.env.VERCEL) {
+if (!sessionStore && (process.env.VERCEL || process.env.REPL_ID || process.env.REPLIT_DEPLOYMENT)) {
+  const platform = process.env.VERCEL ? 'Vercel' : 'Replit';
   console.warn(
-    '[session-store] WARNING: Running on Vercel without REDIS_URL. ' +
-    'Sessions will not persist across serverless invocations — OAuth login will fail. ' +
-    'Set REDIS_URL (Upstash Redis recommended: https://upstash.com) in Vercel dashboard.',
+    `[session-store] WARNING: Running on ${platform} without REDIS_URL. ` +
+    'Sessions use in-memory store — they will be lost on process restart. ' +
+    'Set REDIS_URL (Upstash Redis: https://upstash.com) for persistent sessions.',
   );
 }
 
@@ -61,7 +69,50 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  // Content-Security-Policy
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:     ["'self'"],
+      scriptSrc:      ["'self'", "'unsafe-inline'"],   // CRA requires unsafe-inline in prod build
+      styleSrc:       ["'self'", "'unsafe-inline'"],
+      imgSrc:         ["'self'", 'data:', 'https:'],
+      connectSrc:     ["'self'", 'https://*.pingone.com', 'https://*.pingidentity.com', 'wss:'],
+      fontSrc:        ["'self'", 'data:'],
+      frameAncestors: ["'none'"],
+    },
+  },
+  // HSTS — 2 years, include subdomains
+  strictTransportSecurity: {
+    maxAge:            63072000,
+    includeSubDomains: true,
+    preload:           true,
+  },
+  // X-Frame-Options: DENY
+  frameguard: { action: 'deny' },
+  // Referrer-Policy
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  // X-Content-Type-Options: nosniff (helmet default)
+  noSniff: true,
+  // Permissions-Policy (helmet calls this permittedCrossDomainPolicies, but we set it manually below)
+  permittedCrossDomainPolicies: false,
+  // Disable X-Powered-By
+  hidePoweredBy: true,
+  // X-XSS-Protection (legacy browsers)
+  xssFilter: true,
+}));
+
+// Permissions-Policy header (not in helmet's built-in options)
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
+// Cache-Control: no-store for all API routes
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 // Allow credentials (session cookies) from the configured origin.
 // In development the React CRA proxy makes requests same-origin, so CORS is
 // essentially unused. On Vercel, React and API share the same domain.
@@ -98,7 +149,7 @@ app.use(session({
   secret: (() => {
     const s = process.env.SESSION_SECRET;
     if (!s || s === 'dev-session-secret-change-in-production') {
-      if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+      if (process.env.NODE_ENV === 'production' || process.env.VERCEL || process.env.REPL_ID || process.env.REPLIT_DEPLOYMENT) {
         console.error('[FATAL] SESSION_SECRET env var is not set or is using the insecure default. Set a random 32+ character string in your deployment environment.');
         process.exit(1);
       }
@@ -378,4 +429,10 @@ if (require.main === module) {
   }
 }
 
+// Export app as the default (for supertest / existing requires) and attach
+// named flags so other modules can do: require('./server').isReplit etc.
 module.exports = app;
+module.exports.app         = app;
+module.exports.isProduction = isProduction;
+module.exports.isVercel    = isVercel;
+module.exports.isReplit    = isReplit;

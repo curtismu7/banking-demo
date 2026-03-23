@@ -49,7 +49,10 @@ function getAdminRedirectUri(req, opts = {}) {
     const proto = req.protocol === 'http' ? 'http' : 'https';
     return `${proto}://${getPublicHost(req)}/api/auth/oauth/callback`;
   }
-  return 'http://localhost:3001/api/auth/oauth/callback';
+  // Local dev or Replit — derive from request
+  const proto = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
+  const host  = getPublicHost(req);
+  return `${proto}://${host}/api/auth/oauth/callback`;
 }
 
 /**
@@ -70,7 +73,10 @@ function getUserRedirectUri(req, opts = {}) {
     const proto = req.protocol === 'http' ? 'http' : 'https';
     return `${proto}://${getPublicHost(req)}/api/auth/oauth/user/callback`;
   }
-  return 'http://localhost:3001/api/auth/oauth/user/callback';
+  // Local dev or Replit — derive from request
+  const proto = req.get('x-forwarded-proto') || (req.secure ? 'https' : 'http');
+  const host  = getPublicHost(req);
+  return `${proto}://${host}/api/auth/oauth/user/callback`;
 }
 
 /**
@@ -118,8 +124,11 @@ function getOAuthRedirectDebugInfo(req) {
 function validateRedirectUriOrigin(redirectUri) {
   try {
     const { hostname, protocol } = new URL(redirectUri);
-    if (process.env.VERCEL) {
-      // On Vercel, reject any redirect_uri pointing to localhost/127.0.0.1
+    const isProd = process.env.NODE_ENV === 'production'
+      || !!process.env.VERCEL
+      || !!process.env.REPL_ID
+      || !!process.env.REPLIT_DEPLOYMENT;
+    if (isProd) {
       if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
         return { ok: false, reason: `Redirect URI hostname "${hostname}" is not allowed on this deployment.` };
       }
