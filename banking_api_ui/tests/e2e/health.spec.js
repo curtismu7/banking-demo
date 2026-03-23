@@ -7,10 +7,13 @@
  * to confirm the backend is alive before running more complex UI tests.
  *
  * Prerequisites:
- *   - banking_api_server must be running on http://localhost:3001
+ *   - banking_api_server running (default for run-bank.sh: http://localhost:3002;
+ *     standard start: http://localhost:3001). Override with BANKING_API_BASE.
  *
  * Run with:
- *   cd banking_api_ui && npm run test:e2e -- tests/e2e/health.spec.js
+ *   npm run test:e2e:api
+ *   # or
+ *   cd banking_api_ui && npx playwright test tests/e2e/health.spec.js --config=playwright.api.config.js
  */
 
 const { test, expect } = require('@playwright/test');

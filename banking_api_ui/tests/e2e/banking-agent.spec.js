@@ -31,6 +31,14 @@
 
 const { test, expect } = require('@playwright/test');
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      localStorage.removeItem('userLoggedOut');
+    } catch (_) {}
+  });
+});
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const CUSTOMER_USER = {
@@ -50,11 +58,12 @@ const SAMPLE_ACCOUNTS = {
   ],
 };
 
+// UserDashboard formats transaction.createdAt (camelCase) with date-fns — snake_case breaks render.
 const SAMPLE_TRANSACTIONS = {
   transactions: [
-    { id: 'txn_1', type: 'deposit',    amount: 500,   description: 'Payroll',   created_at: '2026-03-01T10:00:00Z' },
-    { id: 'txn_2', type: 'withdrawal', amount: 100,   description: 'ATM',       created_at: '2026-03-05T14:30:00Z' },
-    { id: 'txn_3', type: 'transfer',   amount: 250,   description: 'Rent',      created_at: '2026-03-10T09:15:00Z' },
+    { id: 'txn_1', type: 'deposit',    amount: 500,   description: 'Payroll',   createdAt: '2026-03-01T10:00:00.000Z' },
+    { id: 'txn_2', type: 'withdrawal', amount: 100,   description: 'ATM',       createdAt: '2026-03-05T14:30:00.000Z' },
+    { id: 'txn_3', type: 'transfer',   amount: 250,   description: 'Rent',      createdAt: '2026-03-10T09:15:00.000Z' },
   ],
 };
 
@@ -130,6 +139,50 @@ async function mockMcpToolError(page) {
   );
 }
 
+/**
+ * BankingAgent enables Admin/Customer login only when loadPublicConfig() reads
+ * pingone_environment_id + client IDs from IndexedDB (see configService + BankingAgent.js).
+ */
+async function seedPublicConfigIndexedDb(page) {
+  await page.evaluate(async () => {
+    const DB_NAME = 'banking-assistant-config';
+    const STORE = 'config';
+    const rows = [
+      { key: 'pingone_environment_id', value: 'e2e-test-env' },
+      { key: 'admin_client_id', value: 'e2e-admin-client' },
+      { key: 'user_client_id', value: 'e2e-user-client' },
+    ];
+    await new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE)) {
+          db.createObjectStore(STORE, { keyPath: 'key' });
+        }
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction(STORE, 'readwrite');
+        const os = tx.objectStore(STORE);
+        for (const row of rows) {
+          os.put(row);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+/** Open the FAB panel and wait until PingOne login buttons are enabled (IndexedDB seeded). */
+async function openAgentPanelWhenConfigured(page) {
+  await page.locator('.banking-agent-fab').click();
+  await expect(page.locator('.banking-agent-login-btn', { hasText: 'Admin Login' })).toBeEnabled({
+    timeout: 15000,
+  });
+}
+
 // ─── LOGIN PAGE tests ──────────────────────────────────────────────────────────
 
 test.describe('BankingAgent — Login page (unauthenticated)', () => {
@@ -148,11 +201,11 @@ test.describe('BankingAgent — Login page (unauthenticated)', () => {
     await expect(page.locator('.banking-agent-panel')).toBeVisible();
   });
 
-  test('panel shows "Banking Agent" title', async ({ page }) => {
+  test('panel shows PingOne AI Core title', async ({ page }) => {
     await mockUnauthenticated(page);
     await page.goto('/');
     await page.locator('.banking-agent-fab').click();
-    await expect(page.locator('.banking-agent-title')).toHaveText('Banking Agent');
+    await expect(page.locator('.banking-agent-title')).toHaveText('PingOne AI Core');
   });
 
   test('subtitle shows "How can I help you today?" when not logged in', async ({ page }) => {
@@ -165,33 +218,36 @@ test.describe('BankingAgent — Login page (unauthenticated)', () => {
   test('welcome message mentions signing in', async ({ page }) => {
     await mockUnauthenticated(page);
     await page.goto('/');
-    await page.locator('.banking-agent-fab').click();
+    await seedPublicConfigIndexedDb(page);
+    await openAgentPanelWhenConfigured(page);
     const messages = page.locator('.banking-agent-messages');
-    await expect(messages).toContainText(/sign in|log in|welcome/i);
+    await expect(messages).toContainText(/sign in|get started/i);
   });
 
   test('"👑 Admin Login" button is visible', async ({ page }) => {
     await mockUnauthenticated(page);
     await page.goto('/');
-    await page.locator('.banking-agent-fab').click();
+    await seedPublicConfigIndexedDb(page);
+    await openAgentPanelWhenConfigured(page);
     await expect(page.locator('.banking-agent-actions')).toContainText('Admin Login');
   });
 
   test('"👤 Customer Login" button is visible', async ({ page }) => {
     await mockUnauthenticated(page);
     await page.goto('/');
-    await page.locator('.banking-agent-fab').click();
+    await seedPublicConfigIndexedDb(page);
+    await openAgentPanelWhenConfigured(page);
     await expect(page.locator('.banking-agent-actions')).toContainText('Customer Login');
   });
 
   test('clicking Admin Login navigates to /api/auth/oauth/login', async ({ page }) => {
     await mockUnauthenticated(page);
-    // Intercept the redirect without actually following it
-    await page.route('**/api/auth/oauth/login**', (route) => route.fulfill({
-      status: 302, headers: { Location: '/' },
-    }));
+    await page.route('**/api/auth/oauth/login**', (route) =>
+      route.fulfill({ status: 302, headers: { Location: '/' } })
+    );
     await page.goto('/');
-    await page.locator('.banking-agent-fab').click();
+    await seedPublicConfigIndexedDb(page);
+    await openAgentPanelWhenConfigured(page);
 
     const [navReq] = await Promise.all([
       page.waitForRequest((req) => req.url().includes('/api/auth/oauth/login')),
@@ -202,11 +258,12 @@ test.describe('BankingAgent — Login page (unauthenticated)', () => {
 
   test('clicking Customer Login navigates to /api/auth/oauth/user/login', async ({ page }) => {
     await mockUnauthenticated(page);
-    await page.route('**/api/auth/oauth/user/login**', (route) => route.fulfill({
-      status: 302, headers: { Location: '/' },
-    }));
+    await page.route('**/api/auth/oauth/user/login**', (route) =>
+      route.fulfill({ status: 302, headers: { Location: '/' } })
+    );
     await page.goto('/');
-    await page.locator('.banking-agent-fab').click();
+    await seedPublicConfigIndexedDb(page);
+    await openAgentPanelWhenConfigured(page);
 
     const [navReq] = await Promise.all([
       page.waitForRequest((req) => req.url().includes('/api/auth/oauth/user/login')),
@@ -242,21 +299,22 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockAuthenticatedCustomer(page);
     await mockMcpTool(page, SAMPLE_ACCOUNTS);
     await page.goto('/dashboard');
-    await expect(page.locator('.banking-agent-fab')).toBeVisible();
+    await expect(page.locator('.banking-agent-fab')).toBeVisible({ timeout: 20000 });
   });
 
   test('panel shows all 6 banking action buttons', async ({ page }) => {
     await mockAuthenticatedCustomer(page);
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    const actions = page.locator('.banking-agent-actions button');
-    await expect(actions).toHaveCount(6);
-    await expect(actions.nth(0)).toContainText('My Accounts');
-    await expect(actions.nth(1)).toContainText('Recent Transactions');
-    await expect(actions.nth(2)).toContainText('Check Balance');
-    await expect(actions.nth(3)).toContainText('Deposit');
-    await expect(actions.nth(4)).toContainText('Withdraw');
-    await expect(actions.nth(5)).toContainText('Transfer');
+    // Six MCP actions + separate "Configure" button (banking-agent-config-btn)
+    const core = page.locator('.banking-agent-actions button.banking-agent-action-btn:not(.banking-agent-config-btn)');
+    await expect(core).toHaveCount(6);
+    await expect(core.nth(0)).toContainText('My Accounts');
+    await expect(core.nth(1)).toContainText('Recent Transactions');
+    await expect(core.nth(2)).toContainText('Check Balance');
+    await expect(core.nth(3)).toContainText('Deposit');
+    await expect(core.nth(4)).toContainText('Withdraw');
+    await expect(core.nth(5)).toContainText('Transfer');
   });
 
   // ── Read-only actions ──
@@ -269,7 +327,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
 
     const [req] = await Promise.all([
       page.waitForRequest((r) => r.url().includes('/api/mcp/tool') && r.method() === 'POST'),
-      page.locator('.banking-agent-actions button', { hasText: 'My Accounts' }).click(),
+      page.getByRole('button', { name: /My Accounts/i }).click(),
     ]);
 
     const body = JSON.parse(req.postData() || '{}');
@@ -288,7 +346,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
 
     const [req] = await Promise.all([
       page.waitForRequest((r) => r.url().includes('/api/mcp/tool')),
-      page.locator('.banking-agent-actions button', { hasText: 'Recent Transactions' }).click(),
+      page.getByRole('button', { name: /Recent Transactions/i }).click(),
     ]);
 
     const body = JSON.parse(req.postData() || '{}');
@@ -303,7 +361,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockAuthenticatedCustomer(page);
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Check Balance' }).click();
+    await page.getByRole('button', { name: /Check Balance/i }).click();
     await expect(page.locator('.banking-agent-form')).toBeVisible();
     await expect(page.locator('label', { hasText: 'Account ID' })).toBeVisible();
   });
@@ -313,7 +371,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockMcpTool(page, SAMPLE_BALANCE);
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Check Balance' }).click();
+    await page.getByRole('button', { name: /Check Balance/i }).click();
 
     await page.locator('input[placeholder*="acc_"]').first().fill('acc_001');
 
@@ -333,7 +391,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockAuthenticatedCustomer(page);
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Deposit' }).click();
+    await page.getByRole('button', { name: /Deposit/i }).click();
 
     const form = page.locator('.banking-agent-form');
     await expect(form).toBeVisible();
@@ -346,7 +404,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockMcpTool(page, { ...SAMPLE_TRANSACTION_CONFIRM, type: 'deposit', amount: 250 });
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Deposit' }).click();
+    await page.getByRole('button', { name: /Deposit/i }).click();
 
     const inputs = page.locator('.banking-agent-field input');
     await inputs.nth(0).fill('acc_001');          // Account ID
@@ -371,7 +429,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockMcpTool(page, { ...SAMPLE_TRANSACTION_CONFIRM, type: 'withdrawal', amount: 100 });
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Withdraw' }).click();
+    await page.getByRole('button', { name: /Withdraw/i }).click();
 
     const inputs = page.locator('.banking-agent-field input');
     await inputs.nth(0).fill('acc_001');
@@ -395,7 +453,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockAuthenticatedCustomer(page);
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Transfer' }).click();
+    await page.getByRole('button', { name: /Transfer/i }).click();
 
     const form = page.locator('.banking-agent-form');
     await expect(form).toBeVisible();
@@ -409,7 +467,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockMcpTool(page, { ...SAMPLE_TRANSACTION_CONFIRM, type: 'transfer', amount: 500 });
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Transfer' }).click();
+    await page.getByRole('button', { name: /Transfer/i }).click();
 
     const inputs = page.locator('.banking-agent-field input');
     await inputs.nth(0).fill('acc_001');    // from
@@ -436,11 +494,18 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
   test('Cancel on Withdraw form hides the form without API call', async ({ page }) => {
     await mockAuthenticatedCustomer(page);
     let mcpCalled = false;
-    await page.route('**/api/mcp/tool', (route) => { mcpCalled = true; route.continue(); });
+    await page.route('**/api/mcp/tool', (route) => {
+      mcpCalled = true;
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ result: {} }),
+      });
+    });
 
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'Withdraw' }).click();
+    await page.getByRole('button', { name: /Withdraw/i }).click();
     await expect(page.locator('.banking-agent-form')).toBeVisible();
 
     await page.locator('.banking-agent-btn-ghost').click();  // Cancel
@@ -455,7 +520,7 @@ test.describe('BankingAgent — Authenticated (customer logged in)', () => {
     await mockMcpToolError(page);
     await page.goto('/dashboard');
     await page.locator('.banking-agent-fab').click();
-    await page.locator('.banking-agent-actions button', { hasText: 'My Accounts' }).click();
+    await page.getByRole('button', { name: /My Accounts/i }).click();
 
     const messages = page.locator('.banking-agent-messages');
     await expect(messages).toContainText(/unavailable|not reachable|mcp/i);

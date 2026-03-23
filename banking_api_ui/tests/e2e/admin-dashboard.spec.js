@@ -14,6 +14,7 @@
  *   - Logout button triggers logout flow
  *   - Non-admin sees UserDashboard, not admin panels
  *   - Activity Logs section accessible to admin
+ *   - Dashboard API calls omit Authorization (BFF uses session cookie only)
  */
 
 const { test, expect } = require('@playwright/test');
@@ -107,6 +108,32 @@ async function mockAdminSession(page, user = ADMIN_USER) {
     })
   );
 
+  // Dashboard.js loads these on mount (admin home)
+  await page.route('**/api/admin/stats**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        stats: {
+          totalUsers: 0,
+          activeUsers: 0,
+          totalAccounts: 0,
+          totalTransactions: 0,
+          totalBalance: 0,
+          averageBalance: 0,
+        },
+      }),
+    })
+  );
+
+  await page.route('**/api/admin/activity/recent**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ logs: [] }),
+    })
+  );
+
   // Block any WebSocket or MCP connections (not needed for these tests)
   await page.route('**/ws**', (route) => route.abort());
   await page.route('**/mcp**', (route) => route.abort());
@@ -173,6 +200,19 @@ test.describe('Admin Dashboard', () => {
     await page.goto('/');
 
     await expect(page.getByText(/accounts/i).first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('dashboard data requests omit Authorization header (BFF session cookie)', async ({ page }) => {
+    await mockAdminSession(page);
+    const statsReqPromise = page.waitForRequest(
+      (req) => req.url().includes('/api/admin/stats') && req.method() === 'GET',
+      { timeout: 15000 }
+    );
+    await page.goto('/');
+    const req = await statsReqPromise;
+    const h = req.headers();
+    const auth = h.authorization ?? h.Authorization;
+    expect(auth).toBeUndefined();
   });
 });
 

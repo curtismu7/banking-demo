@@ -5,6 +5,7 @@ class ApiClient {
     this.client = axios.create({
       baseURL: process.env.REACT_APP_API_URL || '',
       timeout: 10000,
+      withCredentials: true,
     });
 
     this.setupInterceptors();
@@ -47,15 +48,9 @@ class ApiClient {
             }
           } catch (refreshError) {
             console.error('Token refresh failed:', refreshError);
-            
-            // Only redirect to login if refresh is not implemented or no refresh token
-            // This prevents unnecessary redirects during development
-            if (refreshError.response?.status === 501 || refreshError.response?.status === 401) {
-              console.log('Token refresh not available, redirecting to login');
-              this.handleAuthFailure();
-            }
-            
-            return Promise.reject(refreshError);
+            // Do not redirect: refresh often returns 501 (not implemented) or 401 while the
+            // BFF session cookie is still valid. Let the caller surface the original 401.
+            return Promise.reject(error);
           }
         }
 
@@ -79,26 +74,11 @@ class ApiClient {
   }
 
   async getValidToken() {
-    try {
-      // First try to get token from current session
-      const sessionToken = await this.getTokenFromSession();
-      if (sessionToken && !this.isTokenExpired(sessionToken)) {
-        return sessionToken;
-      }
-
-      // If token is expired or not available, try to refresh
-      if (sessionToken) {
-        const refreshedToken = await this.refreshToken();
-        if (refreshedToken) {
-          return refreshedToken;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Error getting valid token:', error);
-      return null;
-    }
+    // BFF pattern: same-origin /api/* calls use the session cookie; the server reads the
+    // access token from req.session. Do not send Authorization: Bearer from a JWT copy
+    // exposed via /oauth/status — it can be expired while the session token is still valid,
+    // causing 401 and a broken refresh flow that redirected to home.
+    return null;
   }
 
   async getTokenFromSession() {
@@ -169,11 +149,10 @@ class ApiClient {
     } catch (error) {
       console.error('Token refresh failed:', error);
       
-      // If refresh is not implemented or no refresh token available, handle gracefully
       if (error.response?.status === 501) {
-        console.log('Token refresh not implemented, will redirect to login');
+        console.log('Token refresh not implemented');
       } else if (error.response?.status === 401) {
-        console.log('No refresh token available, will redirect to login');
+        console.log('No refresh token available');
       }
       
       throw error;

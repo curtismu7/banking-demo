@@ -39,6 +39,12 @@ import apiClient from '../apiClient';
 
 const mockedAxios = axios;
 
+/** Axios instance from the same mock factory the singleton ApiClient uses */
+const mockClientInstance = axios.create.mock.results[0].value;
+const responseInterceptorFromMock =
+  mockClientInstance.interceptors.response.use.mock.calls[0] &&
+  mockClientInstance.interceptors.response.use.mock.calls[0][1];
+
 // Legacy suite: many cases assumed a non-singleton ApiClient and axios 0.x CJS.
 // Kept for reference; replace with focused tests in apiClient.session.test.js.
 describe.skip('UI OAuth Integration Tests (legacy)', () => {
@@ -562,5 +568,44 @@ describe.skip('UI OAuth Integration Tests (legacy)', () => {
       expect(logoutEventFired).toBe(true);
       expect(localStorage.getItem('userLoggedOut')).toBe('true');
     });
+  });
+});
+
+/**
+ * Current BFF behavior — not part of the legacy skipped suite above.
+ */
+describe('apiClient BFF OAuth (current)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    delete axios.defaults.headers.common['Authorization'];
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('getValidToken returns null without calling oauth status endpoints', async () => {
+    const token = await apiClient.getValidToken();
+    expect(token).toBeNull();
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('401 + refresh failure does not call handleAuthFailure', async () => {
+    expect(responseInterceptorFromMock).toEqual(expect.any(Function));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const handleSpy = jest.spyOn(apiClient, 'handleAuthFailure').mockImplementation(() => {});
+    jest.spyOn(apiClient, 'refreshToken').mockRejectedValue({ response: { status: 501 } });
+
+    const originalErr = {
+      response: { status: 401, data: { error: 'expired_token' } },
+      config: { headers: {} },
+    };
+
+    await expect(responseInterceptorFromMock(originalErr)).rejects.toMatchObject({
+      response: { status: 401 },
+    });
+    expect(handleSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });

@@ -10,9 +10,10 @@
  *   # or
  *   npx playwright test --config=playwright.api.config.js
  *
+ * Matches: health.spec.js, banking-operations.spec.js (API must be running).
+ *
  * Env vars:
- *   BANKING_API_BASE  — override API host:port (default http://localhost:3001)
- *                       Set to http://localhost:3002 when using run-bank.sh
+ *   BANKING_API_BASE  — override API host:port (default http://localhost:3002; use 3001 for plain start)
  */
 
 const { defineConfig } = require('@playwright/test');
