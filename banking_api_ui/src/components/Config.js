@@ -162,7 +162,7 @@ export default function Config() {
         }
       }
 
-      setDeploymentManaged(!!data.deploymentManagedPingOneOAuth);
+      setDeploymentManaged(!!data.deploymentManagedPingOneOAuth || process.env.REACT_APP_MANAGED_DEPLOYMENT === 'true');
       setDemoMode(!!data.demoMode);
       setForm((prev) => ({ ...prev, ...formUpdates }));
       setSecretMeta(meta);

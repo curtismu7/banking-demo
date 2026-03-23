@@ -23,6 +23,7 @@ const router  = express.Router();
 const configStore = require('../services/configStore');
 const { FIELD_DEFS, SECRET_KEYS } = require('../services/configStore');
 const { getOAuthRedirectDebugInfo } = require('../services/oauthRedirectUris');
+const { blockInDemoMode } = require('../middleware/demoMode');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -183,7 +184,7 @@ router.post('/test', async (req, res) => {
 // POST /api/admin/config/reset  — wipe all stored config (admin only)
 // ---------------------------------------------------------------------------
 
-router.post('/reset', requireAdminOrUnconfigured, async (req, res) => {
+router.post('/reset', blockInDemoMode('config reset'), requireAdminOrUnconfigured, async (req, res) => {
   if (process.env.VERCEL && !configStore.hasKvStorage()) {
     return res.status(403).json({
       error:   'read_only',

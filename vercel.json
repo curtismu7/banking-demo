@@ -5,7 +5,8 @@
     "env": {
       "NODE_VERSION": "20",
       "CI": "false",
-      "GENERATE_SOURCEMAP": "false"
+      "GENERATE_SOURCEMAP": "false",
+      "DEMO_MODE": "true"
     }
   },
 
