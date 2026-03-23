@@ -387,6 +387,35 @@ app.post('/api/mcp/tool', express.json(), async (req, res) => {
   }
 });
 
+// ── Static file serving (Replit, localhost, and any non-Vercel host) ──────────
+// On Vercel, static files are served by the CDN (vercel.json outputDirectory).
+// On Replit and localhost, Express serves the React build directly.
+if (!process.env.VERCEL) {
+  const buildPath = path.join(__dirname, '..', 'banking_api_ui', 'build');
+  const fs = require('fs');
+  if (fs.existsSync(buildPath)) {
+    app.use(express.static(buildPath));
+    // SPA fallback — serve index.html for all non-API routes
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(buildPath, 'index.html'));
+    });
+    console.log('[static] Serving React build from', buildPath);
+  } else {
+    console.warn('[static] React build not found at', buildPath, '— run: cd banking_api_ui && npm run build');
+    // Friendly message for unbuilt frontend
+    app.get('*', (req, res) => {
+      if (req.path.startsWith('/api')) return res.status(404).json({ error: 'not_found' });
+      res.status(503).send(`
+        <html><body style="font-family:sans-serif;padding:2rem">
+          <h2>Frontend not built</h2>
+          <p>Run <code>cd banking_api_ui && npm run build</code> then restart the server.</p>
+          <p>Or run the dev server: <code>cd banking_api_ui && npm start</code> (port 3000)</p>
+        </body></html>
+      `);
+    });
+  }
+}
+
 // OAuth error handling middleware (should be before general error handler)
 app.use(oauthErrorHandler);
 
