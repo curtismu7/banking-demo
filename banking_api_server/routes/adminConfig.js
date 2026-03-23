@@ -79,6 +79,8 @@ router.get('/', async (req, res) => {
       readOnly:     configStore.isReadOnly(),
       /** Vercel: PingOne OAuth clients (admin, customer, worker) are set in deployment env/KV — not collected in this UI. */
       deploymentManagedPingOneOAuth: !!process.env.VERCEL,
+      /** Demo mode: destructive operations are limited — set via DEMO_MODE env var on shared/public deployments. */
+      demoMode: !!process.env.DEMO_MODE,
       /** Exact redirect URIs to register in PingOne for this deployment (server-computed). */
       redirectInfo,
     });
