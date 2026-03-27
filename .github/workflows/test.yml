@@ -57,3 +57,42 @@ jobs:
         run: npm test -- --watchAll=false --passWithNoTests --forceExit
         env:
           CI: 'true'
+
+  e2e-quality:
+    name: UI Quality Evaluator (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: banking_api_ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: banking_api_ui
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: banking_api_ui
+        run: npx playwright install chromium --with-deps
+
+      - name: Run UI quality evaluator
+        working-directory: banking_api_ui
+        run: npm run test:e2e:quality
+        env:
+          CI: 'true'
+          # CRA dev server is started by Playwright webServer config.
+          # Unset CI for the child so webpack can compile with warnings.
+          # BANKING_UI_PORT defaults to 3000; leave unset to use the default.
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-quality-report
+          path: banking_api_ui/playwright-report/
+          retention-days: 7
