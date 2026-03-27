@@ -118,6 +118,35 @@ When making UI changes, check each criterion applies. When adding new UI feature
 
 ---
 
+## Criterion 7 — Accessibility
+
+**What**: No critical or serious WCAG 2.1 AA violations on the three primary pages. Checked with axe-core.
+
+| Page | Scope | Rules |
+|------|-------|-------|
+| Landing (unauthenticated) | Full page | wcag2a, wcag2aa, wcag21aa |
+| Customer dashboard | Full page | wcag2a, wcag2aa, wcag21aa |
+| Banking agent panel | `.banking-agent-panel` only | wcag2a, wcag2aa, wcag21aa |
+
+Excluded: `color-contrast` — depends on runtime theme and dynamic content; tracked separately.
+
+Only `critical` and `serious` violations fail the check. `moderate` and `minor` are informational.
+
+Common violations to watch for:
+- Buttons without accessible names (`aria-label` or visible text)
+- Form inputs without associated `<label>`
+- Images without `alt` text
+- Interactive elements unreachable by keyboard
+- Invalid ARIA roles
+
+**Why**: Banks have legal WCAG 2.1 AA obligations in most jurisdictions. Accessibility violations also indicate missing semantic structure that assistive technology users — and screen readers used by some testers — rely on.
+
+**Scoring**: 10 points (4 landing + 3 dashboard + 3 agent panel). Total score is now **110 points**.
+
+**Test**: `Accessibility` describe block in `ui-quality.spec.js`; Category 7 in `ui-score.spec.js`
+
+---
+
 ## Regression index
 
 | Commit | Symptom | Criterion |

@@ -9,15 +9,17 @@
  *   npm run test:e2e:score           # from repo root
  *
  * Output (example):
- *   🏦 BX Finance UI Score: 85/100
+ *   🏦 BX Finance UI Score: 95/110
  *   ✅ Token Chain Display        15/15
  *   ✅ Agent FAB & Panel          20/20
  *   ❌ Dashboard Completeness      5/20  ← sections missing
  *   ✅ Landing Page               15/15
  *   ❌ Data & Error Quality        5/15  ← duplicate toasts
  *   ✅ Console & Layout Health    15/15
+ *   ✅ Accessibility              10/10
  *
- * A score below 70 fails the test. The per-check breakdown tells you
+ * Total: 110 points (100 UI completeness + 10 accessibility)
+ * A score below 77 fails the test. The per-check breakdown tells you
  * exactly what was lost so you can restore it.
  *
  * Score thresholds:
@@ -30,6 +32,7 @@
  */
 
 const { test, expect } = require('@playwright/test');
+const { AxeBuilder } = require('@axe-core/playwright');
 const { mockCustomerDashboard } = require('./helpers/customerDashboardMocks');
 
 // ─── Scoring infrastructure ────────────────────────────────────────────────────
@@ -321,6 +324,56 @@ test('BX Finance UI Score — 100-point baseline', async ({ page }) => {
     expect(noOverlap).toBe(true);
   });
 
+  // ── Category 7: Accessibility (10 points) ─────────────────────────────────
+  // WCAG 2.1 AA — critical and serious violations only.
+  // Banking apps have legal accessibility obligations.
+
+  function axeSummary(violations) {
+    return violations
+      .map((v) => `[${v.impact}] ${v.id}: ${v.description}`)
+      .join('; ');
+  }
+
+  await mockLanding(page);
+  await page.goto('/');
+  await expect(page.locator('.landing-page')).toBeVisible({ timeout: 15000 });
+
+  await sc.check('Accessibility › Landing page: no critical/serious WCAG violations', 4, async () => {
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+    const critical = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious');
+    expect(critical, axeSummary(critical)).toHaveLength(0);
+  });
+
+  await mockCustomerDashboard(page);
+  await page.goto('/dashboard');
+  await dismissAgent(page);
+  await expect(page.locator('.user-dashboard')).toBeVisible({ timeout: 15000 });
+
+  await sc.check('Accessibility › Customer dashboard: no critical/serious WCAG violations', 3, async () => {
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+    const critical = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious');
+    expect(critical, axeSummary(critical)).toHaveLength(0);
+  });
+
+  await sc.check('Accessibility › Agent panel: no critical/serious WCAG violations', 3, async () => {
+    await page.locator('.banking-agent-fab').click();
+    await expect(page.locator('.banking-agent-panel')).toBeVisible({ timeout: 20000 });
+    const results = await new AxeBuilder({ page })
+      .include('.banking-agent-panel')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+    const critical = results.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious');
+    expect(critical, axeSummary(critical)).toHaveLength(0);
+    try { await page.getByRole('button', { name: 'Collapse agent' }).click({ timeout: 2000 }); } catch (_) {}
+  });
+
   // ── Score Report ────────────────────────────────────────────────────────────
 
   const { earned, total, lines } = sc.report();
@@ -337,9 +390,9 @@ test('BX Finance UI Score — 100-point baseline', async ({ page }) => {
   };
   fs.writeFileSync('ui-score.json', JSON.stringify(scoreData, null, 2));
 
-  // Hard threshold: below 70 is a CI failure
+  // Hard threshold: below 77 is a CI failure (70% of 110)
   expect(
     earned,
-    `UI score ${earned}/${total} is below the 70-point minimum. See breakdown above.`,
-  ).toBeGreaterThanOrEqual(70);
+    `UI score ${earned}/${total} is below the 77-point minimum. See breakdown above.`,
+  ).toBeGreaterThanOrEqual(77);
 });

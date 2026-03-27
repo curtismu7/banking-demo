@@ -41,6 +41,7 @@
     "test:e2e:score": "playwright test tests/e2e/ui-score.spec.js --reporter=list"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@playwright/test": "^1.44.0",
     "@resvg/resvg-js": "^2.6.2"
   },

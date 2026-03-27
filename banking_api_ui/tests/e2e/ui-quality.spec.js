@@ -16,9 +16,11 @@
  *   4. Notification Quality  — No toast storms or duplicates on page load
  *   5. Brand & Professional  — BX Finance branding, no raw HTML/JSON artifacts
  *   6. Console Health        — No JS errors on page load
+ *   7. Accessibility         — No critical/serious axe-core WCAG violations
  */
 
 const { test, expect } = require('@playwright/test');
+const { AxeBuilder } = require('@axe-core/playwright');
 const {
   mockCustomerDashboard,
 } = require('./helpers/customerDashboardMocks');
@@ -461,6 +463,77 @@ test.describe('Console Health', () => {
 
     const realErrors = errors.filter((e) => !isTestEnvNoise(e));
     expect(realErrors, `Console errors during panel toggle: ${realErrors.join('\n')}`).toHaveLength(0);
+  });
+
+});
+
+// ─── Criterion 7: Accessibility ───────────────────────────────────────────────
+// Prevents: missing labels, keyboard traps, low contrast, role misuse.
+// Banking apps have legal WCAG 2.1 AA obligations.
+// Only critical + serious violations are checked — minor/moderate are warnings.
+
+test.describe('Accessibility', () => {
+
+  /**
+   * Format axe violations into a readable summary for failure messages.
+   */
+  function summarise(violations) {
+    return violations
+      .map((v) => `[${v.impact}] ${v.id}: ${v.description} (${v.nodes.length} node(s))`)
+      .join('\n');
+  }
+
+  test('landing page has no critical or serious WCAG violations', async ({ page }) => {
+    await mockLanding(page);
+    await page.goto('/');
+    await expect(page.locator('.landing-page')).toBeVisible({ timeout: 15000 });
+
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .disableRules(['color-contrast']) // skip contrast — depends on theme/dynamic content
+      .analyze();
+
+    const critical = results.violations.filter((v) =>
+      v.impact === 'critical' || v.impact === 'serious',
+    );
+    expect(critical, `Landing a11y violations:\n${summarise(critical)}`).toHaveLength(0);
+  });
+
+  test('customer dashboard has no critical or serious WCAG violations', async ({ page }) => {
+    await mockCustomerDashboard(page);
+    await page.goto('/dashboard');
+    await dismissAgentPanel(page);
+    await expect(page.locator('.user-dashboard')).toBeVisible({ timeout: 15000 });
+
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+
+    const critical = results.violations.filter((v) =>
+      v.impact === 'critical' || v.impact === 'serious',
+    );
+    expect(critical, `Dashboard a11y violations:\n${summarise(critical)}`).toHaveLength(0);
+  });
+
+  test('banking agent panel has no critical or serious WCAG violations', async ({ page }) => {
+    await mockCustomerDashboard(page);
+    await page.goto('/dashboard');
+
+    // Open the panel so axe can inspect its DOM
+    await page.locator('.banking-agent-fab').click();
+    await expect(page.locator('.banking-agent-panel')).toBeVisible({ timeout: 20000 });
+
+    const results = await new AxeBuilder({ page })
+      .include('.banking-agent-panel')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+
+    const critical = results.violations.filter((v) =>
+      v.impact === 'critical' || v.impact === 'serious',
+    );
+    expect(critical, `Agent panel a11y violations:\n${summarise(critical)}`).toHaveLength(0);
   });
 
 });
