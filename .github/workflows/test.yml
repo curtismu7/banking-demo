@@ -80,14 +80,30 @@ jobs:
         working-directory: banking_api_ui
         run: npx playwright install chromium --with-deps
 
+      # Start CRA dev server in the background. Playwright's webServer config cannot
+      # reliably manage react-scripts start in CI (exits code 1 before webpack compiles).
+      # We start it explicitly, wait for it, then tell Playwright to skip webServer.
+      - name: Start CRA dev server
+        working-directory: banking_api_ui
+        run: BROWSER=none PORT=3000 HOST=127.0.0.1 HTTPS=false npm start &
+
+      - name: Wait for dev server to be ready
+        run: |
+          echo "Waiting for http://127.0.0.1:3000 ..."
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3000 >/dev/null && echo "Server ready after ${i}x3s" && exit 0
+            echo "  attempt $i/60..."
+            sleep 3
+          done
+          echo "Dev server did not start in 180s" && exit 1
+
       - name: Run UI quality evaluator
         working-directory: banking_api_ui
         run: npm run test:e2e:quality
         env:
           CI: 'true'
-          # CRA dev server is started by Playwright webServer config.
-          # Unset CI for the child so webpack can compile with warnings.
-          # BANKING_UI_PORT defaults to 3000; leave unset to use the default.
+          # Server is already running above; skip Playwright's webServer logic.
+          PLAYWRIGHT_SKIP_WEBSERVER: '1'
 
       - name: Upload Playwright report on failure
         if: failure()
