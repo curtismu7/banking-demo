@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -31,6 +31,27 @@ import EducationPanelsHost from './components/education/EducationPanelsHost';
 import Footer from './components/Footer';
 import './App.css';
 
+/**
+ * Sets a CSS custom property on <html> so the left-rail FABs (CIBA / CIMD / Logs)
+ * are always positioned below whatever header is on the current page.
+ * Must be rendered inside <Router> so useLocation is available.
+ */
+function RouteClassModifier() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    // Toggle a class on .App — CSS rules in App.css target this with high
+    // specificity to push the left-rail FABs below the dashboard header.
+    const appEl = document.querySelector('.App');
+    if (!appEl) return;
+    if (pathname === '/dashboard') {
+      appEl.classList.add('App--on-dashboard');
+    } else {
+      appEl.classList.remove('App--on-dashboard');
+    }
+  }, [pathname]);
+  return null;
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -61,53 +82,52 @@ function App() {
   const checkOAuthSession = useCallback(async () => {
     console.log('🔍 checkOAuthSession - Checking for active OAuth sessions...');
     try {
-      // Check admin OAuth session
+      // 1. Check admin OAuth session
       console.log('👑 Checking admin OAuth session...');
       const adminResponse = await axios.get('/api/auth/oauth/status');
-      console.log('👑 Admin OAuth response:', {
-        authenticated: adminResponse.data.authenticated,
-        user: adminResponse.data.user,
-        expiresAt: adminResponse.data.expiresAt
-      });
-      
       if (adminResponse.data.authenticated) {
-        console.log('✅ Admin OAuth session found, logging in user:', adminResponse.data.user);
+        console.log('✅ Admin OAuth session found:', adminResponse.data.user);
         setUser(adminResponse.data.user);
         const userEmail = adminResponse.data.user?.email;
-        if (userEmail) {
-          injectEmailIntoNextSessionInit(userEmail);
-        }
+        if (userEmail) injectEmailIntoNextSessionInit(userEmail);
         window.dispatchEvent(new CustomEvent('userAuthenticated'));
         setLoading(false);
-        return;
+        return true;
       }
-      
-      // Check end user OAuth session
+
+      // 2. Check end-user OAuth session
       console.log('👤 Checking end user OAuth session...');
       const userResponse = await axios.get('/api/auth/oauth/user/status');
-      console.log('👤 End user OAuth response:', {
-        authenticated: userResponse.data.authenticated,
-        user: userResponse.data.user,
-        expiresAt: userResponse.data.expiresAt
-      });
-      
       if (userResponse.data.authenticated) {
-        console.log('✅ End user OAuth session found, logging in user:', userResponse.data.user);
+        console.log('✅ End user OAuth session found:', userResponse.data.user);
         setUser(userResponse.data.user);
         const userEmail = userResponse.data.user?.email;
-        if (userEmail) {
-          injectEmailIntoNextSessionInit(userEmail);
-        }
+        if (userEmail) injectEmailIntoNextSessionInit(userEmail);
         window.dispatchEvent(new CustomEvent('userAuthenticated'));
         setLoading(false);
-        return;
+        return true;
       }
-      
-      console.log('❌ No active OAuth sessions found');
+
+      // 3. Generic BFF session cookie fallback (handles cookie-restore after page reload)
+      console.log('🍪 Checking generic session cookie...');
+      const sessionResponse = await axios.get('/api/auth/session');
+      if (sessionResponse.data.authenticated) {
+        console.log('✅ Generic session found:', sessionResponse.data.user);
+        setUser(sessionResponse.data.user);
+        const userEmail = sessionResponse.data.user?.email;
+        if (userEmail) injectEmailIntoNextSessionInit(userEmail);
+        window.dispatchEvent(new CustomEvent('userAuthenticated'));
+        setLoading(false);
+        return true;
+      }
+
+      console.log('❌ No active sessions found');
       setLoading(false);
+      return false;
     } catch (error) {
-      console.log('❌ Error checking OAuth sessions:', error.message);
+      console.log('❌ Error checking sessions:', error.message);
       setLoading(false);
+      return false;
     }
   }, [injectEmailIntoNextSessionInit]);
 
@@ -116,8 +136,9 @@ function App() {
 
     const userLoggedOut = localStorage.getItem('userLoggedOut');
     if (userLoggedOut === 'true') {
-      console.log('🚪 User explicitly logged out, skipping authentication check');
+      console.log('🚪 User explicitly logged out, clearing server session');
       localStorage.removeItem('userLoggedOut');
+      fetch('/api/auth/clear-session', { method: 'POST', credentials: 'include' }).catch(() => {});
       setLoading(false);
       return;
     }
@@ -127,12 +148,41 @@ function App() {
       .then(({ data }) => savePublicConfig(data.config))
       .catch(() => {}); // non-fatal
 
+    const isOAuthCallback = new URLSearchParams(window.location.search).get('oauth') === 'success';
+
+    if (isOAuthCallback) {
+      // After a PingOne redirect the session may not be in Redis yet — retry with backoff.
+      const retryDelays = [450, 950, 1900];
+      let retryIndex = 0;
+      const attempt = async () => {
+        console.log('🔄 OAuth callback — checking session (attempt', retryIndex + 1, ')...');
+        const found = await checkOAuthSession();
+        if (found) return;
+        if (retryIndex >= retryDelays.length) return;
+        setTimeout(attempt, retryDelays[retryIndex++]);
+      };
+      const t = setTimeout(attempt, 200);
+      return () => clearTimeout(t);
+    }
+
     const t = setTimeout(() => {
       console.log('🔄 Checking for OAuth session...');
       checkOAuthSession();
     }, 200);
     return () => clearTimeout(t);
   }, [checkOAuthSession]);
+
+  // Re-check session when BankingAgent fires userAuthenticated (e.g. after token exchange)
+  useEffect(() => {
+    const handleUserAuthenticated = () => {
+      if (!user) {
+        console.log('🔄 userAuthenticated event received — re-checking session');
+        checkOAuthSession();
+      }
+    };
+    window.addEventListener('userAuthenticated', handleUserAuthenticated);
+    return () => window.removeEventListener('userAuthenticated', handleUserAuthenticated);
+  }, [user, checkOAuthSession]);
 
   const logout = () => {
     console.log('🚪 Starting logout — navigating to /api/auth/logout');
@@ -168,9 +218,11 @@ function App() {
   }
 
   return (
+
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <EducationUIProvider>
       <TokenChainProvider>
+        <RouteClassModifier />
         <div className="App end-user-nano">
           <ToastContainer position="top-right" autoClose={4000} hideProgressBar={false} newestOnTop closeOnClick pauseOnHover draggable />
           {/* These pages are always accessible, regardless of auth state */}
