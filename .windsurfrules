@@ -486,3 +486,47 @@ Validate at API boundaries only (user input, external APIs). No defensive valida
 | `GET /api/admin/users` | Admin | PingOne user directory |
 | `GET /api/config` | Admin | Read app config |
 | `POST /api/config` | Admin | Update config |
+
+---
+
+## UI Quality Rules — read before touching any React component
+
+The UI has a **100-point scoring harness** in `banking_api_ui/tests/e2e/ui-score.spec.js`.
+Run it before and after any UI change:
+
+```bash
+npm run test:e2e:score    # see your score (must not drop)
+npm run test:e2e:quality  # 22 pass/fail checks (all must pass)
+```
+
+The authoritative quality contract is `docs/ui-quality-criteria.md`.
+
+### Protected elements — never delete or rename
+
+**Token Chain Display** (`.tcd-root`): The token tracker shows the full auth flow
+(User Token → BFF → RFC 8693 Exchange → MCP Token → Banking API). It opens via
+`.token-info-btn` in the dashboard header. Required classes: `.tcd-root`,
+`.tcd-header-title` ("Token Chain"), `.tcd-tabs`, `.tcd-tab`, `.tcd-badge`, `.tcd-legend`.
+
+**Banking Agent FAB** (`.banking-agent-fab`): Must show 🏦 icon, be fully inside
+viewport, and never overlap `.logout-btn`. Required panel classes: `.banking-agent-panel`,
+`.ba-title` ("BX Finance AI Agent"), `.ba-left-col`, `.ba-right-col`.
+
+**Agent Action Buttons** (`.ba-action-item` × 8): 🏦 My Accounts, 📋 Recent Transactions,
+💰 Check Balance, ⬇ Deposit, ⬆ Withdraw, ↔ Transfer, 🔧 MCP Tools, 🚪 Log Out.
+All 8 icons must be present.
+
+**Dashboard** (`.user-dashboard`): Must always contain "Your Accounts" and
+"Recent Transactions" headings, `.accounts-grid`, `.transactions-table`, `.logout-btn`.
+
+**Landing** (`.landing-page`): `.brand-name` = "BX Finance", 6 `.feature-card` elements,
+3 `.step` elements, Customer + Admin sign-in buttons.
+
+### Data formatting rules
+
+| Rule | Correct | Wrong |
+|------|---------|-------|
+| Currency | `$1,500.00` | `1500`, `1500.0` |
+| Dates | `Mar 1, 2026` | `2026-03-01T10:00:00.000Z` |
+| Errors | Friendly sentence | Stack trace (`at Object.`) |
+| Toasts | ≤ 1 per page load | Multiple on load |
