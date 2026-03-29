@@ -33,7 +33,13 @@ const USE_KV   = !!(KV_URL && KV_TOKEN);
 const KV_HASH_KEY = 'banking:config';
 
 // Fields that must be encrypted at rest
-const SECRET_KEYS = new Set(['admin_client_secret', 'user_client_secret', 'session_secret', 'authorize_worker_client_secret']);
+const SECRET_KEYS = new Set([
+  'admin_client_secret',
+  'user_client_secret',
+  'session_secret',
+  'authorize_worker_client_secret',
+  'pingone_client_secret',
+]);
 
 // All known config keys with their defaults and whether they are public
 const FIELD_DEFS = {
@@ -53,6 +59,11 @@ const FIELD_DEFS = {
   user_client_secret:     { public: false, default: '' },
   user_redirect_uri:      { public: true,  default: '' },
 
+  // Management API worker (client_credentials) — CIMD registration, email, bootstrap run.
+  // Not the admin sign-in app. Env: PINGONE_MANAGEMENT_CLIENT_ID / PINGONE_MANAGEMENT_CLIENT_SECRET.
+  pingone_client_id:     { public: true,  default: '' },
+  pingone_client_secret: { public: false, default: '' },
+
   // PingOne authorize: pi.flow + response_mode=pi.flow for apps that support it (e.g. DaVinci flow policies).
   // See https://developer.pingidentity.com/pingone-api/auth/auth-config-options/browserless-authentication-flow-options.html
   admin_pingone_authorize_pi_flow: { public: true, default: 'false' },
@@ -61,6 +72,12 @@ const FIELD_DEFS = {
   // Auth server
   admin_role:             { public: true,  default: 'admin' },
   user_role:              { public: true,  default: 'customer' },
+  // Comma-separated list of PingOne preferred_usernames that always receive admin role
+  admin_username:         { public: true,  default: '' },
+  // PingOne population ID whose members are treated as admin (no schema changes needed)
+  admin_population_id:    { public: true,  default: '' },
+  // PingOne userinfo/ID-token claim whose value is compared against admin_role (e.g. a custom attribute)
+  admin_role_claim:       { public: true,  default: '' },
 
   // Server / misc
   session_secret:         { public: false, default: '' },
@@ -69,10 +86,27 @@ const FIELD_DEFS = {
   debug_oauth:            { public: true,  default: 'false' },
 
   // PingOne Authorize (policy decision point for transfers/withdrawals)
-  authorize_enabled:              { public: true,  default: 'false' },
-  authorize_policy_id:            { public: true,  default: '' },
-  authorize_worker_client_id:     { public: true,  default: '' },
-  authorize_worker_client_secret: { public: false, default: '' },
+  authorize_enabled:                { public: true,  default: 'false' },
+  // Phase 2: Decision Endpoints API — preferred path (set this in PingOne Authorize → Decision Endpoints)
+  authorize_decision_endpoint_id:   { public: true,  default: '' },
+  // Optional: second decision endpoint for MCP first-tool delegation (DecisionContext=McpFirstTool in TF params)
+  authorize_mcp_decision_endpoint_id: { public: true, default: '' },
+  // Phase 1: Legacy PDP path — fallback when decision endpoint ID is not set
+  authorize_policy_id:              { public: true,  default: '' },
+  authorize_worker_client_id:       { public: true,  default: '' },
+  authorize_worker_client_secret:   { public: false, default: '' },
+
+  // Feature flags — granular toggles for in-development features
+  // Each maps to a runtime behaviour controlled via /api/admin/feature-flags.
+  ff_authorize_fail_open:  { public: true, default: 'true'  }, // fail open (allow) on Authorize errors
+  ff_authorize_deposits:   { public: true, default: 'false' }, // apply Authorize to deposits too
+  // When true with authorize_enabled: run in-process simulated Authorize (education); no PingOne call
+  ff_authorize_simulated:  { public: true, default: 'false' },
+  // PingOne Authorize (or simulated) once per session on first BankingAgent MCP tool call — see docs/PINGONE_AUTHORIZE_PLAN.md §7
+  ff_authorize_mcp_first_tool: { public: true, default: 'false' },
+  ff_hitl_enabled:         { public: true, default: 'true'  }, // require human approval for agent-initiated high-value transactions
+  ff_inject_may_act:       { public: true, default: 'false' }, // BFF-synthesise may_act when absent from user token (demo/dev — no PingOne change needed)
+  ff_inject_audience:      { public: true, default: 'false' }, // BFF-add mcp_resource_uri to aud claim snapshot when absent (demo/dev — no PingOne change needed)
 
   // RFC 8693 Token Exchange — MCP server resource URI
   // When set, the Backend-for-Frontend (BFF) exchanges user tokens for delegated tokens scoped to this
@@ -91,6 +125,19 @@ const FIELD_DEFS = {
   // 'ciba'  → back-channel (CIBA) challenge shown inline on the dashboard
   // 'email' → OIDC re-authentication redirect (PingOne email / OTP MFA)
   step_up_method: { public: true, default: 'ciba' },
+
+  /** UI industry / white-label preset (client applies colors + logo). See banking_api_ui/src/config/industryPresets.js */
+  ui_industry_preset: { public: true, default: 'bx_finance' },
+
+  /**
+   * Space-separated OAuth scopes allowed for RFC 8693 exchange to MCP (agent capability).
+   * Subset of KNOWN scopes in agentMcpScopePolicy.js — disabling a scope blocks matching MCP tools.
+   */
+  agent_mcp_allowed_scopes: {
+    public: true,
+    default:
+      'banking:read banking:write banking:accounts:read banking:transactions:read banking:transactions:write ai_agent',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -338,17 +385,25 @@ class ConfigStore {
         'PINGONE_CORE_USER_REDIRECT_URI',
         'PINGONE_USER_REDIRECT_URI',
       ],
+      pingone_client_id:     ['PINGONE_MANAGEMENT_CLIENT_ID', 'PINGONE_CIMD_CLIENT_ID'],
+      pingone_client_secret: ['PINGONE_MANAGEMENT_CLIENT_SECRET', 'PINGONE_CIMD_CLIENT_SECRET'],
       admin_pingone_authorize_pi_flow: ['PINGONE_ADMIN_AUTHORIZE_PI_FLOW'],
       user_pingone_authorize_pi_flow:  ['PINGONE_USER_AUTHORIZE_PI_FLOW'],
       admin_role:             ['ADMIN_ROLE'],
       user_role:              ['USER_ROLE'],
+      admin_username:         ['ADMIN_USERNAME'],
+      admin_population_id:    ['ADMIN_POPULATION_ID'],
+      admin_role_claim:       ['ADMIN_ROLE_CLAIM'],
       session_secret:         ['SESSION_SECRET'],
       frontend_url:           ['REACT_APP_CLIENT_URL', 'FRONTEND_ADMIN_URL'],
-      mcp_server_url:         ['MCP_SERVER_URL'],
-      mcp_resource_uri:       ['MCP_SERVER_RESOURCE_URI'],
-      debug_oauth:            ['DEBUG_OAUTH'],
+      mcp_server_url:                   ['MCP_SERVER_URL'],
+      mcp_resource_uri:                 ['MCP_RESOURCE_URI', 'MCP_SERVER_RESOURCE_URI'],
+      authorize_decision_endpoint_id:   ['PINGONE_AUTHORIZE_DECISION_ENDPOINT_ID'],
+      authorize_mcp_decision_endpoint_id: ['PINGONE_AUTHORIZE_MCP_DECISION_ENDPOINT_ID'],
+      debug_oauth:                      ['DEBUG_OAUTH'],
       ciba_enabled:           ['CIBA_ENABLED'],
       step_up_method:         ['STEP_UP_METHOD'],
+      agent_mcp_allowed_scopes: ['AGENT_MCP_ALLOWED_SCOPES'],
     };
 
     const envVars = envFallbackMap[key] || [];

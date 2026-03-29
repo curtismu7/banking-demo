@@ -6,11 +6,12 @@
  *
  * Returns { result, tokenEvents } so callers can push events to TokenChainContext.
  * tokenEvents is an array of token lifecycle objects from the Backend-for-Frontend (BFF):
- *   - User Token decoded claims + may_act status (+ jwtFullDecode JSON)
+ *   - User access token decoded claims + may_act status (+ jwtFullDecode JSON)
  *   - Token Exchange (RFC 8693) request + result
- *   - MCP Token (delegated) decoded claims + act status (+ jwtFullDecode JSON)
+ *   - MCP access token (delegated) decoded claims + act status (+ jwtFullDecode JSON)
  */
 import { appendTokenEvents } from './apiTrafficStore';
+import { appendMcpCall } from './mcpCallStore';
 
 // ─── Session refresh (RFC 6749 §6) — same endpoints as Backend-for-Frontend (BFF) auto-refresh ───────
 
@@ -54,6 +55,7 @@ export async function callMcpTool(tool, params = {}) {
     credentials: 'include',
   };
 
+  const t0 = Date.now();
   let response = await fetch('/api/mcp/tool', fetchOpts);
   if (response.status === 401) {
     const err401 = await response.clone().json().catch(() => ({}));
@@ -69,6 +71,8 @@ export async function callMcpTool(tool, params = {}) {
   if (!response.ok) {
     const err = await response.json().catch(() => ({ message: response.statusText }));
     const tokenEvents = err.tokenEvents || [];
+    // Record in the dedicated MCP call history store (synchronous, no patchFetch race)
+    appendMcpCall(tool, response.status, Date.now() - t0, null, err.message || `HTTP ${response.status}`);
     // Surface any partial token events (e.g. exchange-failed) in the API Traffic viewer
     appendTokenEvents(tool, tokenEvents);
     const e = Object.assign(new Error(err.message || `MCP error: ${response.status}`), {
@@ -80,6 +84,8 @@ export async function callMcpTool(tool, params = {}) {
   }
 
   const data = await response.json();
+  // Record in the dedicated MCP call history store (synchronous, reliable)
+  appendMcpCall(tool, response.status, Date.now() - t0, data.result);
   // Push token-event entries (user token, RFC 8693 exchange, MCP token) to API Traffic viewer
   appendTokenEvents(tool, data.tokenEvents || []);
   return {
@@ -125,5 +131,61 @@ export function createWithdrawal(accountId, amount, description) {
     account_id: accountId,
     amount,
     description: description || 'Agent withdrawal',
+  });
+}
+
+// ─── Consent-challenge retry helpers (used by BankingAgent after HITL modal confirms) ───────────────
+// These call the REST endpoint directly with a consentChallengeId so the
+// server's HITL gate is satisfied. They return { result, tokenEvents } to
+// match the shape returned by callMcpTool().
+
+async function callRestTransaction(body) {
+  const res = await fetch('/api/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = Object.assign(
+      new Error(data.message || data.error || `Transaction failed: ${res.status}`),
+      { statusCode: res.status, code: data.error }
+    );
+    throw e;
+  }
+  return { result: data, tokenEvents: [] };
+}
+
+export function createTransferWithConsent(fromAccountId, toAccountId, amount, description, consentChallengeId) {
+  return callRestTransaction({
+    fromAccountId,
+    toAccountId,
+    amount,
+    type: 'transfer',
+    description: description || 'Agent transfer',
+    consentChallengeId,
+  });
+}
+
+export function createDepositWithConsent(accountId, amount, description, consentChallengeId) {
+  return callRestTransaction({
+    toAccountId: accountId,
+    fromAccountId: null,
+    amount,
+    type: 'deposit',
+    description: description || 'Agent deposit',
+    consentChallengeId,
+  });
+}
+
+export function createWithdrawalWithConsent(accountId, amount, description, consentChallengeId) {
+  return callRestTransaction({
+    fromAccountId: accountId,
+    toAccountId: null,
+    amount,
+    type: 'withdrawal',
+    description: description || 'Agent withdrawal',
+    consentChallengeId,
   });
 }

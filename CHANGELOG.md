@@ -17,7 +17,80 @@ Versions use calendar dates: `YYYY.MM.DD`.
 ## [Unreleased]
 
 ### Added
+- MCP first-tool PingOne Authorize gate: `ff_authorize_mcp_first_tool` flag, `mcpToolAuthorizationService.js`, `authorize_mcp_decision_endpoint_id` config key; `POST /api/mcp/tool` evaluates once per session before the WebSocket call
+- `GET /api/authorize/evaluation-status` includes `mcpFirstTool*` fields; PingOneAuthorizePanel shows MCP gate status
+- AGENTS.md and CLAUDE.md agent instruction files; architecture PNGs
+- REGRESSION_PLAN: Section 1 critical area for MCP gate, Section 6 new env vars, Section 7 smoke-test step
+- Feature Flags system: `GET/PATCH /api/admin/feature-flags`, FLAG_REGISTRY with 5 flags
+- `FeatureFlagsPage` admin UI (`/feature-flags`) — toggle switches per flag, grouped by category, live save, warning badges for security-sensitive flags
+- "Feature Flags" accent button in admin Dashboard toolbar
+- New configStore fields: `ff_authorize_fail_open` (fail-open on Authorize errors, default ON), `ff_authorize_deposits` (apply Authorize to deposits, default OFF), `ff_hitl_enabled` (HITL agent consent gate, default ON)
+- `transactions.js`: `ff_authorize_fail_open` controls fail-open vs fail-closed behaviour; `ff_authorize_deposits` adds deposits to the Authorize evaluation scope
 
+### Fixed
+- Pre-existing `no-unused-vars` lint errors in `DemoDataPage.js` and `UserDashboard.js` (suppressed with eslint-disable-next-line)
+- **OTP email verification for high-value transactions** — after the user checks the consent checkbox and clicks "Agree & send code", a 6-digit OTP is generated (HMAC-SHA256/per-challenge salt, timing-safe compare) and sent via PingOne email; the transaction only executes once the correct code is verified; challenge state machine: `pending → otp_pending → confirmed → consumed`; max 3 attempts, 5-minute TTL; new route `POST /consent-challenge/:id/verify-otp`; dev fallback when email unconfigured; 7 unit tests added
+- **Exchange Audit Log** (`services/exchangeAuditStore.js`) — Redis-backed (Upstash KV) audit log for RFC 8693 token-exchange events; `writeExchangeEvent()` LPUSH+LTRIM to `banking:exchange-audit` (max 200 entries), `readExchangeEvents()` LRANGE; graceful no-op when KV env vars are absent
+- **`GET /api/logs/exchange`** — dedicated endpoint returning Redis exchange audit events in standard `{logs,total}` shape; LogViewer "Exchange Audit" dropdown option + included in "all sources" fetch
+- `TOKEN_EXCHANGE` category added to `LOG_CATEGORIES` in `utils/logger.js`
+
+### Fixed
+- **Agent consent gate UX** — clicking a tool chip or typing a query before accepting consent now opens `AgentConsentModal` with a friendly message instead of showing `❌ Agent consent required...` error in chat (commit `32e1667`)
+- **Token exchange: full PingOne error now visible** — `oauthService.performTokenExchange`, `performTokenExchangeWithActor`, and `getAgentClientCredentialsToken` now attach `httpStatus`, `pingoneError`, `pingoneErrorDescription`, `pingoneErrorDetail`, `requestContext` as named properties on the thrown Error; `console.error` logs the full structured object; exchange-failed tokenEvent description shows HTTP status + PingOne error code + detail (commit `b4272ee`)
+- **Log viewer empty after cross-Lambda exchange failure** — Vercel serverless: the Lambda that ran the exchange and the Lambda serving `GET /api/logs/console` are separate processes with isolated `recentLogs[]` memory; `GET /api/logs/console` is now async and merges Redis exchange audit events, deduplicating messages already present from the same Lambda (commit `b4272ee`)
+
+
+- Shared `draggablePanel.css` with `.drp-backdrop` (dim overlay) and `.drp-resize-grip` (SE corner)
+- `AgentConsentModal` — now draggable and resizable (portal, grab-handle header, resize grip)
+- `AddDelegateModal` — now draggable and resizable (portal, grab-handle header, resize grip)
+- `TokenExchangeSimulator` — now draggable and resizable (portal, starts viewport-filling, drag/resize freely)
+
+### Fixed
+- **Investment (and extra) accounts lost on cold-start** — `dataStore` is in-memory only; `provisionDemoAccounts` deleted all accounts and re-created only checking+savings whenever the in-memory store was empty (every Vercel cold-start). Fix: `demoScenario PUT` now saves an `accountSnapshot` array to `demoScenarioStore` (Redis/KV) after every save; `GET /api/accounts/my` and `GET /api/demo-data` both try to restore from that snapshot before falling back to provisioning; `POST /accounts/reset-demo` updates the snapshot to the freshly provisioned 2-account state so future cold-starts restore the reset (commit `1a93c77`)
+- **Bottom dock + admin middle agent restored** — `EmbeddedAgentDock.js` had an `isBankingAgentDashboardRoute` guard that returned null for ALL dashboard routes, preventing both the App-level and UserDashboard-level dock renders; removed the guard; added `onUserDashboardRoute` in `App.js` to skip the App-level dock on `/dashboard`/`/` (UserDashboard handles those) and to scope middle-mode float suppression only to UserDashboard routes so the admin Dashboard.js still gets the float agent in middle mode (commit `db73404`)
+- **`DemoDataPage` build error** — `handleResetDefaults` called `setAccounts` (removed in type-slot refactor); replaced with `setTypeSlots` callback updating `checking`/`savings` slots from `defaults.checkingName/Balance` and `defaults.savingsName/Balance` — blocked every Vercel deploy (commit `0058450`)
+- **Button routing audit** — `LandingPage` Logs quick-link was calling `handleOAuthLogin('admin')` instead of opening `/logs`; `OAuthDebugLogViewer` "← Dashboard" always linked to `/` instead of role-aware `/admin` / `/dashboard`; 7 Dashboard Quick Action buttons used `window.location.href` (full-page reload) instead of React Router `<Link>` — 3 bugs fixed, 41 routing tests added (commit `b21dcf7`)
+- **`get_account_balance` type-name IDs** — tool returned `❌ Account checking not found` because it called `getAccountById` directly; now loads accounts via `ensureAccounts` and resolves via `resolveAccountId` (same as deposit/withdraw/transfer) (commit `3aaeee4`)
+- **`may_act absent` wording** — Token Chain panel and agent chat said "exchange **will** fail" as a hard guarantee; changed to "may fail" / "exchange will be attempted" in `TokenChainDisplay.js` (header, body, legend) and `agentMcpTokenService.js` `describeMayAct` (commit `f48120d`)
+- `DemoDataPage.js` JSX syntax error in template literal (invalid `${...}` interpolation)
+
+- **In-app Agent Consent** (`AgentConsentModal.js` / `AgentConsentModal.css`) — replaced PingOne ACR-gate consent with a fully self-contained in-app modal; `POST /api/auth/oauth/user/consent` records consent in session; `DELETE /consent` revokes for demo reset; `SKIP_AGENT_CONSENT=true` env var disables gate; no PingOne agreement or auth policy needed
+- **3-column Split Dashboard layout** — Token Chain (slim `220px`) | AI Agent (`1fr`) | Customer Accounts (`1fr`); all three columns same height, same row; action/suggestion chips now render as horizontal pill strip below the chat prompt instead of side column; responsive collapse at ≤1024px
+
+### Fixed
+
+- **`/consent-url` missing PKCE** — `GET /api/auth/oauth/user/consent-url` was building the authorization URL manually, omitting `code_challenge` and `code_challenge_method`; PingOne would have rejected the token exchange at callback; now uses `oauthService.generateAuthorizationUrl()` (same builder as login) and adds `setPkceCookie` for Vercel cold-start recovery
+- **`/consent-url` missing redirect-URI validation** — added `validateRedirectUriOrigin` guard mirroring the login route
+- **Split dashboard column heights** — columns were different heights due to `overflow: visible` and content-driven sizing; fixed with `overflow: hidden`, explicit `height: min(calc(100vh - 130px), 900px)` on the grid and `height: 100%` on all three cells
+- **Agent panel didn't fill column** — `embedded-banking-agent` had fixed `min(70vh, 360px)` height; `ud-dashboard-inline-agent` now overrides to `height: 100%` to fill the grid cell
+
+### Changed
+
+- `agentMcpTokenService.js` consent gate now checks `req.session.agentConsentGiven === true` (in-app flag) instead of `acr === AGENT_CONSENT_ACR` env var; `AGENT_CONSENT_ACR` env var is no longer used
+- `GET /api/auth/oauth/user/status` returns `consentGiven` (boolean) and `consentedAt` (ISO string) instead of `consentAcr`
+- Token Chain Display consent pills updated to show in-app consent status instead of ACR value
+- `ba-split-column` action strip now shows all action chips (session, actions, suggestions) as horizontal pills — previously hid all except suggestions
+ — `pingOneAuthorizeService.js` now targets `POST /decisionEndpoints/{endpointId}` (preferred) with automatic fallback to legacy PDP path; new `authorize_decision_endpoint_id` config field + `PINGONE_AUTHORIZE_DECISION_ENDPOINT_ID` env alias; Config UI "Decision Endpoint ID" field; `transactions.js` logs `path` + `decisionId`
+- **PingOne Authorize — Phase 3 Recent Decisions** — `GET /api/authorize/recent-decisions` + `GET /api/authorize/decision-endpoints` admin routes; `PingOneAuthorizePanel.js` rewritten with 5 rich tabs including live "🔍 Recent Decisions" viewer with PERMIT/DENY badges and expandable JSON
+- **SPIFFE implementation plan** — `docs/SPIFFE_PLAN.md` defines 4 integration points (JWT-SVID as RFC 8693 actor_token, mTLS BFF↔MCP, agent workload identity, PingGateway SPIFFE bridging) and 4 phased delivery phases; workload identity map and environment variable spec included
+- **Landing page quick-links** — hero section now shows shortcut buttons matching the edu-bar: CIBA guide, CIMD Simulator, Home, Dashboard, API, Logs, Demo config
+- **`mcp_resource_uri` Config UI field** — RFC 8693 MCP audience URI can now be set from Admin → Config without a redeploy; previously env-var only (`MCP_SERVER_RESOURCE_URI`)
+- **Best Practices education panel** — new `BestPracticesPanel.js` with 6-tab Education Drawer covering all five Ping Identity AI Agent best practices: Know Your Agents, Detect Agents, Use Delegation Not Impersonation, Enforce Least Privilege, Human in the Loop; each tab shows plain-English explanation + BX Finance implementation status + linked deep-dives; accessible from hamburger menu (⭐ AI Agent Best Practices, featured blue button)
+
+- **Delegated Access page** (`/delegated-access`) — family-member account delegation with "Access I've granted" / "Granted to me" tabs; account-level multi-select; **RFC 8693 Token Exchange** explainer panel showing `may_act` / `act` claims; "Act as" demo simulation; quick-action button on UserDashboard
+- **Token Exchange Simulator** (`DelegatedAccessPage.js`) — replaces static Act-as explainer with a live 2-column inspector: left = token chain (user-token → exchange-required → agent-actor-token → exchanged-token with status badges), right = selected event detail showing `POST /as/token` API call body, JWT claims with `may_act`/`act` colour-coding, explanation, and full JWT toggle; fires real `POST /api/mcp/tool` on open; retry button + spinner + error state
+- **Token Inspector panel** — floating, draggable, resizable, collapsible detail panel for each token chain event; launched via hover-reveal inspect icon per row; rendered via `ReactDOM.createPortal` for off-screen capability
+- **Agent UI placement** — new **Middle / Bottom / Float + FAB** toggle replaces Floating/Embedded/Both; `AgentUiModeContext` stores `{ placement, fab }` under `banking_agent_ui_v2`; Middle+Bottom together not permitted
+- **Bottom dock integration** — resize handle is now the visual seam between page content and dock (no gap); collapsed state keeps rounded-pill corners; dark-theme overrides updated
+- **Slim token-chain column** in split3 view (`160–200px`) so agent and banking columns have more space
+
+- **Customer split dashboard** (token \| inline agent \| banking) with **Split view** / **Classic** toggle (`dashboardLayout.js`); **Agent UI** modes **Floating** / **Embedded** / **Both** with split-aware FAB/dock suppression (`customerSplit3Dashboard.js`)
+- **TransactionConsentModal** — high-value HITL as an on-dashboard popup (checkbox authorizing the assistant); **`/transaction-consent?challenge=…`** still works as a deep link
+- **Industry branding** (`IndustryBrandingContext`, presets, `BrandLogo`, Config) and **agent MCP scope policy** (server + UI config)
+- **GET `/api/transactions/consent-challenge/:challengeId`** — snapshot for consent UI (registered before **`GET /:id`**); routes **`/admin/banking`**, **`/transaction-consent`**; **SessionReauthBanner** for **`SESSION_REAUTH_EVENT`**
+- **Floating Banking Agent** only on signed-in dashboard homes **`/`**, **`/admin`**, **`/dashboard`** (Router wraps **`AppWithAuth`**); larger default/expanded panel sizing — see **`REGRESSION_LOG.md`** (2026-03-27)
+- **appToast** (`banking_api_ui/src/utils/appToast.js`): shared **`notifySuccess` / `notifyError` / `notifyWarning` / `notifyInfo`** for react-toastify; **UserDashboard** step-up MFA (428) uses a persistent warning toast with verify actions; **`dashboardToast`** remains for session errors with **Sign in** — see `REGRESSION_LOG.md`, `docs/runbooks/regression/post-deploy.md`
+- **Embedded agent dock** (`EmbeddedAgentDock.js`, **`useDemoMode`**) and related demo-scenario / FAB visibility updates — see `docs/runbooks/regression/ui-browser.md` where touched
 - **Session regression tooling**: `npm run test:session` from repo root or `banking_api_server` (focused Jest subset); `npm run test:e2e:session` in `banking_api_ui` (Playwright `request` smoke only); `GET /api/auth/session` contract tests for `sessionStoreHealthy` / `sessionStoreError` with production-shaped middleware; Playwright API smoke `session-regression.spec.js`; runbook `docs/runbooks/session-regression.md`
 - **Session debugging**: expanded `GET /api/auth/debug` (`oauthTokenSummary`, `diagnosisHints`, optional `?deep=1` Redis vs `req.session`, `sessionInMemoryCache`); `GET /api/auth/session` includes `sessionStoreHealthy`; Banking Agent session-fix copy + deep debug link — see `REGRESSION_LOG.md`, `FEATURES.md`
 - Left-side rail: **HOME** (`/`) and role-based **Admin** (`/admin`) / **Dashboard** (`/dashboard`) links (signed-in dashboard button); stack positions use `App--has-nav-dash` when both rows show
@@ -32,6 +105,9 @@ Versions use calendar dates: `YYYY.MM.DD`.
 
 ### Fixed
 
+- **Transactions admin page** / **OAuth debug log** / **BankingAdminOps**: removed invalid **`setError`** calls and **`toast.error`** without import; errors use **`notifyError`** / **`toastAdminSessionError`**
+- **McpInspector** / **EmbeddedAgentDock**: ESLint JSX spacing and **`no-useless-computed-key`** for CSS variables (CI **`CI=true` build**)
+- **Playwright Banking Agent E2E** (`banking-agent.spec.js`): collapse locator scoped to header tools; MCP actions scoped to `.ba-action-item` (avoids suggestion-chip collisions); forms assert **Account** selects and `#field-*` ids — see `REGRESSION_LOG.md`, `npm run test:e2e:agent`
 - **HITL transaction consent (API)**: Wire **`POST /api/transactions/consent-challenge`** and **`POST /api/transactions/consent-challenge/:id/confirm`**, and enforce session-bound consent on **`POST /api/transactions`** for non-admin high-value writes (**> $500**) — `REGRESSION_LOG.md`, `transactionConsentChallenge.js`, `routes/transactions.js`
 - **Customer dashboard blank / no user data**: **`/api/accounts/my`** and **`/api/transactions/my`** are fetched **separately** (transactions require scopes — **403** no longer fails the whole load); **normalize** API rows (`balance`, **`createdAt`/`created_at`**); **sample demo data** when the API returns no accounts, when transactions are **403**, on **401** soft-fail, on session-missing path, or generic errors; **empty transactions** row when accounts loaded but history is empty
 - **False “session expired” (customer dashboard)**: **`GET /api/accounts/my`** / **`/api/transactions/my`** now **retry on 401** (session/JWT lag); if the BFF still reports a user via **`resolveSessionUser`**, show a **single** soft warning toast (stable **`toastId`**) instead of “session expired”; **hard** expiry uses **`toastCustomerError`** with **`toastId: customer-auth-required`** so duplicate Sign-in toasts do not stack; agent-driven refresh uses **one** delayed fetch instead of two

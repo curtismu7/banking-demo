@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { toast } from 'react-toastify';
+import { toast, notifySuccess, notifyError, notifyInfo } from '../utils/appToast';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   getMyAccounts,
@@ -15,16 +15,21 @@ import { loadPublicConfig } from '../services/configService';
 import { useEducationUIOptional } from '../context/EducationUIContext';
 import { useTokenChainOptional } from '../context/TokenChainContext';
 import { useTheme } from '../context/ThemeContext';
+import { useIndustryBranding } from '../context/IndustryBrandingContext';
 import { EDU } from './education/educationIds';
 import { EDUCATION_COMMANDS } from './education/educationCommands';
 import { fetchNlStatus, parseNaturalLanguage } from '../services/bankingAgentNlService';
 import { getToolStepsForAction } from '../utils/agentToolSteps';
-import LoadingOverlay from './shared/LoadingOverlay';
+import { spinner } from '../services/spinnerService';
 import {
   AGENT_CONSENT_BLOCK_USER_MESSAGE,
   isAgentBlockedByConsentDecline,
+  setAgentBlockedByConsentDecline,
 } from '../services/agentAccessConsent';
 import { isBankingAgentFloatingDefaultOpen } from '../utils/bankingAgentFloatingDefaultOpen';
+import AgentConsentModal from './AgentConsentModal';
+import TransactionConsentModal from './TransactionConsentModal';
+import bffAxios from '../services/bffAxios';
 import './BankingAgent.css';
 
 // ─── Action definitions ────────────────────────────────────────────────────────
@@ -42,53 +47,66 @@ const ACTIONS = [
 
 // ─── Fake account data generator ────────────────────────────────────────────────
 
-function generateFakeAccounts(user) {
-  const userId = user?.sub || user?.id || 'user123';
-  
-  // Match server's account ID pattern: chk-{uid} and sav-{uid}
-  const uid = userId.replace(/-/g, '').slice(0, 10);
-  
-  const accounts = [
+function generateFakeAccounts(_user) {
+  // Use plain type names ('checking', 'savings') as IDs — NOT chk-/sav-prefixed fake IDs.
+  // The server's resolveAccountId resolves 'checking' → real checking account by type,
+  // so submissions while liveAccounts are still loading will succeed instead of returning
+  // '❌ Account chk-5 not found' (stale fake IDs bypass type-resolution on the server).
+  return [
     {
-      id: `chk-${uid}`,
-      name: 'Primary Checking',
+      id: 'checking',
+      name: 'Checking Account',
       type: 'checking',
-      balance: 3000.00,
-      accountNumber: `CHK-${uid.toUpperCase()}`,
+      balance: 0,
+      accountNumber: 'CHECKING',
     },
     {
-      id: `sav-${uid}`,
-      name: 'Emergency Savings',
+      id: 'savings',
+      name: 'Savings Account',
       type: 'savings',
-      balance: 2000.00,
-      accountNumber: `SAV-${uid.toUpperCase()}`,
+      balance: 0,
+      accountNumber: 'SAVINGS',
     },
   ];
-  
-  return accounts;
 }
 
 // ─── Suggested prompts — role-aware ──────────────────────────────────────────
 
 const SUGGESTIONS_CUSTOMER = [
-  'Check my account balance',
+  'Show me my accounts',
   'Transfer $100 to savings',
-  'What are my recent transactions?',
-  'List MCP tools',
-  'What is CIBA?',
-  'How does token exchange work?',
-  'What is MCP?',
+  'Deposit $50 into checking',
 ];
 
 const SUGGESTIONS_ADMIN = [
   'Show all customer accounts',
-  'List recent system transactions',
   'Show me last 5 errors',
-  'Show last success login for bankuser',
-  'List MCP tools',
-  'What is CIBA?',
-  'How does token exchange work?',
   'What is step-up auth?',
+];
+
+/** Embedded dock on `/config` — setup / OAuth / env, not day-to-day banking. */
+const CONFIG_ACTION_IDS = ['mcp_tools', 'logout'];
+
+const SUGGESTIONS_CONFIG_CUSTOMER = [
+  'How do I change industry branding (e.g. FunnyBank) on the config page?',
+  'How do Agent MCP scopes limit transfers vs read-only?',
+  'What PingOne or OAuth environment variables does this app need?',
+  'How should I set redirect URIs for local development?',
+  'What OAuth scopes does the BFF use?',
+  'What is PKCE and why does this app use it?',
+  'List MCP tools',
+  'How do I fix invalid_redirect_uri?',
+];
+
+const SUGGESTIONS_CONFIG_ADMIN = [
+  'How do I add a new industry preset (colors, logo) to this demo?',
+  'What is agent_mcp_allowed_scopes and how does token exchange use it?',
+  'What worker app credentials does the API server need in production?',
+  'What redirect URIs should I register in PingOne for this demo?',
+  'Show me last 5 errors',
+  'List MCP tools',
+  'How does token exchange work for the MCP server?',
+  'What is CIBA?',
 ];
 
 /**
@@ -198,7 +216,26 @@ function normalizeAgentToolResult(result) {
       return result;
     }
   }
+
   return result;
+}
+
+/**
+ * Build the payload expected by POST /api/transactions/consent-challenge
+ * from the agent actionId + form values (same keys used in runAction).
+ */
+function buildConsentIntent(actionId, form) {
+  const amount = parseFloat(form.amount);
+  if (actionId === 'deposit') {
+    return { type: 'deposit', toAccountId: form.accountId, fromAccountId: null, amount, description: form.note || 'Agent deposit' };
+  }
+  if (actionId === 'withdraw') {
+    return { type: 'withdrawal', fromAccountId: form.accountId, toAccountId: null, amount, description: form.note || 'Agent withdrawal' };
+  }
+  if (actionId === 'transfer') {
+    return { type: 'transfer', fromAccountId: form.fromId, toAccountId: form.toId, amount, description: form.note || 'Agent transfer' };
+  }
+  return null;
 }
 
 /** Maps MCP JSON (including deposit/transfer/withdraw shapes) to results panel + dashboard event types. */
@@ -268,24 +305,34 @@ function formatResult(result) {
 
 // ─── Input form for actions that need parameters ──────────────────────────────
 
-function ActionForm({ action, onSubmit, onCancel, loading, effectiveUser }) {
+function ActionForm({ action, onSubmit, onCancel, loading, effectiveUser, liveAccounts }) {
   const fakeAccounts = generateFakeAccounts(effectiveUser);
-  const toAccounts = fakeAccounts.filter(a => a.id !== fakeAccounts[0]?.id);
+  // Prefer real accounts fetched from the server; fall back to generated placeholders only if
+  // the live list hasn't arrived yet (avoids the chk-{uid} vs server-ID mismatch that caused
+  // '❌ Account chk-5 not found')
+  const accounts = liveAccounts && liveAccounts.length > 0 ? liveAccounts : fakeAccounts;
+
+  // Transfer: toAccounts is state-driven so it excludes whichever fromId is selected.
+  // We keep it as a separate state to re-derive when fromId changes.
+  const [selectedFromId, setSelectedFromId] = React.useState(() => accounts[0]?.id);
+  const toAccounts = accounts.filter(a => a.id !== (selectedFromId || accounts[0]?.id));
+  // Ensure toId stays valid when fromId changes
+  const defaultToId = toAccounts[0]?.id;
 
   const fields = {
-    balance:  [{ key: 'accountId', label: 'Account', type: 'select', options: fakeAccounts }],
+    balance:  [{ key: 'accountId', label: 'Account', type: 'select', options: accounts }],
     deposit:  [
-      { key: 'accountId', label: 'Account', type: 'select', options: fakeAccounts },
+      { key: 'accountId', label: 'Account', type: 'select', options: accounts },
       { key: 'amount',    label: 'Amount ($)',  placeholder: '0.00', type: 'number' },
       { key: 'note',      label: 'Note',        placeholder: 'optional' },
     ],
     withdraw: [
-      { key: 'accountId', label: 'Account', type: 'select', options: fakeAccounts },
+      { key: 'accountId', label: 'Account', type: 'select', options: accounts },
       { key: 'amount',    label: 'Amount ($)',  placeholder: '0.00', type: 'number' },
       { key: 'note',      label: 'Note',        placeholder: 'optional' },
     ],
     transfer: [
-      { key: 'fromId',    label: 'From Account', type: 'select', options: fakeAccounts },
+      { key: 'fromId',    label: 'From Account', type: 'select', options: accounts,   onChange: (v) => { setSelectedFromId(v); set('toId', toAccounts.find(a => a.id !== v)?.id || defaultToId); } },
       { key: 'toId',      label: 'To Account',   type: 'select', options: toAccounts },
       { key: 'amount',    label: 'Amount ($)',        placeholder: '0.00', type: 'number' },
       { key: 'note',      label: 'Note',              placeholder: 'optional' },
@@ -294,16 +341,16 @@ function ActionForm({ action, onSubmit, onCancel, loading, effectiveUser }) {
 
   // Pre-populate selects with their visible default so submitting without touching dropdowns works
   const defaultForm = {
-    balance:  { accountId: fakeAccounts[0]?.id },
-    deposit:  { accountId: fakeAccounts[0]?.id },
-    withdraw: { accountId: fakeAccounts[0]?.id },
-    transfer: { fromId: fakeAccounts[0]?.id, toId: toAccounts[0]?.id },
+    balance:  { accountId: accounts[0]?.id },
+    deposit:  { accountId: accounts[0]?.id },
+    withdraw: { accountId: accounts[0]?.id },
+    transfer: { fromId: accounts[0]?.id, toId: toAccounts[0]?.id },
   }[action] || {};
 
   const [form, setForm] = useState(defaultForm);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Keep select defaults in sync when effectiveUser resolves after mount (async session check)
+  // Keep select defaults in sync when effectiveUser resolves or live accounts arrive
   React.useEffect(() => {
     setForm(f => {
       const updated = { ...f };
@@ -315,7 +362,7 @@ function ActionForm({ action, onSubmit, onCancel, loading, effectiveUser }) {
       }
       return updated;
     });
-  }, [effectiveUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [effectiveUser?.id, liveAccounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Build a normalized submit payload — resolve any missing select values to the displayed default. */
   const handleSubmit = () => {
@@ -338,12 +385,12 @@ function ActionForm({ action, onSubmit, onCancel, loading, effectiveUser }) {
             <select
               id={`field-${f.key}`}
               value={form[f.key] || (f.options[0]?.id || '')}
-              onChange={e => set(f.key, e.target.value)}
+              onChange={e => { set(f.key, e.target.value); f.onChange?.(e.target.value); }}
               className="banking-agent-select"
             >
               {f.options.map(option => (
                 <option key={option.id} value={option.id}>
-                  {option.name} ({option.accountNumber}) - ${option.balance.toFixed(2)}
+                  {option.name} ({option.accountNumber}) - {formatCurrency(option.balance)}
                 </option>
               ))}
             </select>
@@ -461,7 +508,17 @@ function ResultsPanel({ panel, onClose, style }) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-function welcomeMessage(u) {
+function welcomeMessage(u, focus = 'banking', brandShortName = 'BX Finance') {
+  if (focus === 'config') {
+    if (!u) {
+      return `⚙️ Ask about PingOne, redirect URIs, OAuth scopes, **Agent MCP scopes** (limit transfers vs read-only), environment variables, and **industry branding** (${brandShortName} vs other presets) for this demo.`;
+    }
+    const name = u.firstName || u.name?.split(' ')[0] || 'there';
+    if (u.role === 'admin') {
+      return `⚙️ Hi ${name} — you're on Application Configuration. Ask about environment IDs, worker apps, redirect URIs, OAuth, **Industry & branding** (\`ui_industry_preset\`), or **Agent MCP scopes** (\`agent_mcp_allowed_scopes\`) — turn off transfers for a read-only agent demo; the BFF runs RFC 8693 token exchange on each tool call with the selected scopes. Banking shortcuts are hidden here. Theme: **${brandShortName}**.`;
+    }
+    return `⚙️ Hi ${name} — you're on Application Configuration. Ask how to connect PingOne, switch branding (e.g. FunnyBank), or limit the agent with **Agent MCP scopes** (e.g. disable transfers). Theme: **${brandShortName}**.`;
+  }
   if (!u) return "👋 You're signed in! What would you like to do?";
   const name = u.firstName || u.name?.split(' ')[0] || 'there';
   if (u.role === 'admin') {
@@ -523,17 +580,32 @@ const TOPIC_MESSAGES = {
   'agent-gateway': `🌐 Agent Gateway / Resource Indicators (RFC 8707):\n\nRFC 8707: client specifies the resource URI when requesting a token\n  /as/token?resource=https://mcp.example.com\n  → token aud = "https://mcp.example.com"\n\nRFC 9728: Protected Resource Metadata\n  GET https://mcp.example.com/.well-known/oauth-protected-resource\n  → { resource, authorization_servers, scopes_supported }\n\nThis lets a dynamic AI agent discover what auth is needed before attempting a tool call — no hardcoded configuration.`,
   'pingone-authorize': `🔐 PingOne Authorize (DaVinci):\n\nPingOne Authorize evaluates access policies at runtime using DaVinci flows.\n\nIn this demo it drives:\n• Step-up MFA triggers (ACR values like "Multi_factor")\n• CIBA push notifications to the user's device\n• Dynamic consent for high-value transactions\n\nThe acr_values parameter in /as/authorize tells PingOne which DaVinci policy to run.`,
   'cimd': `📄 Client ID Metadata Document (CIMD / RFC 7591):\n\nTraditional OAuth: client_id is an opaque string, pre-registered in the AS.\nCIMD: client_id is a URL you control — it hosts the client's metadata.\n\nThe AS fetches the URL to discover:\n  { redirect_uris, grant_types, scope, client_name, logo_uri, … }\n\nBenefits:\n• No pre-registration — client registers itself\n• Client controls updates (change the hosted document)\n• Works across AS instances that support DCR/RFC 7591\n\nIn this demo: click "▶ Simulate" in the CIMD panel to see PingOne dynamic client registration.`,
-  'human-in-loop': `👤 Human-in-the-loop (HITL) for the banking agent:\n\n• Over $500 the server issues a consent challenge in your session; after you confirm on the consent page, POST /transactions must include matching consentChallengeId (one-time use).\n• The agent cannot complete that path without your browser session.\n• If you decline, this demo disables the assistant until you sign out and sign in again.\n• HITL ≠ MITM (attack). Open the drawer: What is HITL · Patterns & best practices · This app and the agent · Declining and lockout.`,
+  'human-in-loop': `👤 Human-in-the-loop (HITL) for the banking agent:\n\n• Over $500 the server issues a consent challenge in your session; after you confirm in the consent popup, POST /transactions must include matching consentChallengeId (one-time use).\n• The agent cannot complete that path without your browser session.\n• If you decline, this demo disables the assistant until you sign out and sign in again.\n• HITL ≠ MITM (attack). Open the drawer: What is HITL · Patterns & best practices · This app and the agent · Declining and lockout.`,
 };
 
 /**
  * @param {object} props
  * @param {'float' | 'inline'} [props.mode]
  * @param {boolean} [props.embeddedDockBottom] When inline, stack chat on top and suggestions below (dashboard bottom bar)
+ * @param {'banking' | 'config'} [props.embeddedFocus] When `config`, dock on Application Configuration emphasizes setup (not transfers).
+ * @param {boolean} [props.distinctFloatingChrome] When floating, stronger card/chrome so it reads as a separate widget vs the page.
+ * @param {boolean} [props.splitColumnChrome] Inline mode: compact “assistant” chrome for token | agent | banking columns (navy header, chat bubbles).
  */
-export default function BankingAgent({ user, onLogout, mode = 'float', embeddedDockBottom = false }) {
+export default function BankingAgent({
+  user,
+  onLogout,
+  mode = 'float',
+  embeddedDockBottom = false,
+  embeddedFocus = 'banking',
+  distinctFloatingChrome = false,
+  splitColumnChrome = false,
+}) {
   const isInline = mode === 'inline';
   const isBottomDock = isInline && embeddedDockBottom;
+  const isConfigEmbeddedFocus = embeddedFocus === 'config';
+  const splitChrome = Boolean(splitColumnChrome && isInline);
+  const { preset: industryPreset } = useIndustryBranding();
+  const brandShortName = industryPreset.shortName;
   const edu = useEducationUIOptional();
   const tokenChain = useTokenChainOptional();
   const {
@@ -543,11 +615,15 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     setAgentAppearance,
     effectiveAgentTheme,
   } = useTheme();
-  const [isOpen, setIsOpen] = useState(() =>
-    typeof window !== 'undefined'
-      ? isBankingAgentFloatingDefaultOpen(window.location.pathname)
-      : false
-  );
+  const [isOpen, setIsOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    if (isInline) return false;
+    try {
+      const saved = localStorage.getItem('banking-agent-open');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return isBankingAgentFloatingDefaultOpen(window.location.pathname);
+  });
   /** Panel light/dark: default follows page (`auto`); can override in header. */
   const isDark = effectiveAgentTheme === 'dark';
   const [isExpanded, setIsExpanded] = useState(false);
@@ -556,19 +632,21 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
   const [nlLoading, setNlLoading] = useState(false);
   const [nlMeta, setNlMeta] = useState(null);
   const [activeAction, setActiveAction] = useState(null);
-  const [loginOverlay, setLoginOverlay] = useState({ show: false, message: '', sub: '' });
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   /** null = loading; which OAuth flows have client IDs + environment */
   const [oauthConfig, setOauthConfig] = useState(null);
   /** {x,y} when panel has been dragged; null = CSS-anchored default position */
   const [dragPos, setDragPos] = useState(null);
-  /** Panel dimensions for resizing */
-  const [panelSize, setPanelSize] = useState({ width: 260, height: 210 });
+  /** Panel dimensions for resizing — floating default is large enough for header, chips, and two-column body */
+  const [panelSize, setPanelSize] = useState({ width: 400, height: 480 });
   /** Side panel showing rich results next to the agent */
   const [resultPanel, setResultPanel] = useState(null);
   /** MCP server connection status for header display */
   const [mcpStatus, setMcpStatus] = useState({ toolCount: null, connected: false });
+  /** Real accounts from /api/accounts/my — used for the balance/deposit/withdraw/transfer form
+   *  dropdowns so IDs always match what the server has stored (avoids chk-{uid} mismatch). */
+  const [liveAccounts, setLiveAccounts] = useState([]);
   /**
    * Self-detected session user — populated by independent auth check so the
    * agent knows the session even if the parent App.js user prop hasn't resolved yet.
@@ -579,10 +657,22 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
   const [sessionRefreshing, setSessionRefreshing] = useState(false);
   /** True when identity came from _auth cookie / stub token — MCP and NL need a Redis-backed session. */
   const [cookieOnlyBffSession, setCookieOnlyBffSession] = useState(false);
+  /** True while the 2s reconnect poll is actively running (shows "Reconnecting…" banner). */
+  const [sessionReconnecting, setSessionReconnecting] = useState(false);
   /** Avoid repeating the session-fix error bubble after we showed it on load or after a failed action. */
   const sessionFixBubbleShownRef = useRef(false);
   /** User declined high-value consent — tools/chat disabled until sign-out (agentAccessConsent). */
-  const [consentBlocked, setConsentBlocked] = useState(() => isAgentBlockedByConsentDecline());
+  // Always start false — the block is session-scoped, not page-load-scoped.
+  // Clear any stale localStorage value immediately so refresh/login never shows the banner.
+  const [consentBlocked, setConsentBlocked] = useState(() => {
+    setAgentBlockedByConsentDecline(false);
+    return false;
+  });
+  /** True when the user has accepted the in-app agent consent agreement. */
+  /** Pending HITL intent — shows AgentConsentModal (transaction mode) before OTP. */
+  const [hitlPendingIntent, setHitlPendingIntent] = useState(null);
+  /** Challenge ID issued after the user clicks Authorize in AgentConsentModal. */
+  const [hitlChallengeId, setHitlChallengeId] = useState(null);
 
   const bottomRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -608,10 +698,36 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     if (consentBlocked) setActiveAction(null);
   }, [consentBlocked]);
 
+  // Listen for UserDashboard confirming a HITL consent challenge.
+  // The modal already executes the transaction — we just surface the success message in the agent.
+  useEffect(() => {
+    const onConfirmed = (e) => {
+      const { actionId, successMsg } = e.detail || {};
+      const label = ACTIONS.find(a => a.id === actionId)?.label || actionId;
+      addMessage('assistant', `✅ **${label} approved and completed.**\n\n${successMsg || 'The transaction went through after your consent.'}`, actionId);
+      notifySuccess(`✅ ${label} complete`);
+    };
+    window.addEventListener('banking-agent-hitl-confirmed', onConfirmed);
+    return () => window.removeEventListener('banking-agent-hitl-confirmed', onConfirmed);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  // Persist open state so the panel survives a page refresh
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    if (isInline) return;
+    try { localStorage.setItem('banking-agent-open', String(isOpen)); } catch {}
+  }, [isOpen, isInline]);
+
   // Floating mode: follow **route changes** only — default collapsed on dashboard homes, open on tool routes.
   // Do not tie this to user/session (see REGRESSION_LOG — auth sync was resetting isOpen and closing the panel).
   useEffect(() => {
     if (isInline) return;
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return; // skip initial mount — let localStorage-restored value stand
+    }
     setIsOpen(isBankingAgentFloatingDefaultOpen(location.pathname));
   }, [location.pathname, isInline]);
 
@@ -641,9 +757,9 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
       retryDelays.forEach((delay, i) => {
         const t = setTimeout(async () => {
           const result = await Promise.all([
-            fetch('/api/auth/oauth/status',      { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-            fetch('/api/auth/oauth/user/status', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-            fetch('/api/auth/session',           { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch('/api/auth/oauth/status',      { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch('/api/auth/oauth/user/status', { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch('/api/auth/session',           { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
           ]);
           const [admin, endUser, session] = result;
           const { found, cookieOnlyBffSession: cookieOnly } = resolveSessionFromAuthTrio(admin, endUser, session);
@@ -652,7 +768,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
             setSessionUser(found);
             setMessages(prev => {
               if (prev.length > 0) return prev;
-              const welcome = { id: `${Date.now()}-w`, role: 'assistant', content: welcomeMessage(found) };
+              const welcome = { id: `${Date.now()}-w`, role: 'assistant', content: welcomeMessage(found, embeddedFocus, brandShortName) };
               if (cookieOnly) {
                 sessionFixBubbleShownRef.current = true;
                 return [
@@ -687,15 +803,53 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     if (!user) return;
     setMessages(prev =>
       prev.length === 0
-        ? [{ id: Date.now().toString(), role: 'assistant', content: welcomeMessage(user) }]
+        ? [{ id: Date.now().toString(), role: 'assistant', content: welcomeMessage(user, embeddedFocus, brandShortName) }]
         : prev
     );
-  }, [user]);
+  }, [user, embeddedFocus, brandShortName]);
 
   // Effective user: prefer prop (App.js state), fall back to self-detected session
   const effectiveUser = user || sessionUser;
   const isLoggedIn = !!effectiveUser;
   const isConfigured = oauthConfig && (oauthConfig.admin || oauthConfig.user);
+
+  // Fetch real account IDs from the server whenever the user is known.
+  // Stored in liveAccounts and passed to ActionForm so the balance/deposit/withdraw/transfer
+  // dropdowns always send the ID the server actually has (prevents '❌ Account chk-5 not found').
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    let cancelled = false;
+    fetch('/api/accounts/my', { credentials: 'include', _silent: true })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.accounts?.length) return;
+        setLiveAccounts(
+          data.accounts.map(a => ({
+            id: a.id,
+            name: a.name || (a.accountType === 'savings' ? 'Savings Account' : 'Checking Account'),
+            type: a.accountType || a.account_type || 'checking',
+            balance: a.balance || 0,
+            accountNumber: a.accountNumber || a.account_number || a.id,
+          }))
+        );
+      })
+      .catch(() => { /* silent — ActionForm falls back to generateFakeAccounts */ });
+    return () => { cancelled = true; };
+  }, [isLoggedIn]);
+
+  const suggestionList = useMemo(() => {
+    if (isConfigEmbeddedFocus) {
+      return effectiveUser?.role === 'admin' ? SUGGESTIONS_CONFIG_ADMIN : SUGGESTIONS_CONFIG_CUSTOMER;
+    }
+    return effectiveUser?.role === 'admin' ? SUGGESTIONS_ADMIN : SUGGESTIONS_CUSTOMER;
+  }, [isConfigEmbeddedFocus, effectiveUser?.role]);
+
+  const actionsList = useMemo(() => {
+    if (isConfigEmbeddedFocus) {
+      return ACTIONS.filter(a => CONFIG_ACTION_IDS.includes(a.id));
+    }
+    return ACTIONS;
+  }, [isConfigEmbeddedFocus]);
 
   /**
    * Independently check auth endpoints.  Called on mount, on panel open, and
@@ -707,17 +861,52 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
    */
   const checkSelfAuth = useCallback(() => {
     Promise.all([
-      fetch('/api/auth/oauth/status',      { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/auth/oauth/user/status', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/auth/session',           { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/auth/oauth/status',      { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/auth/oauth/user/status', { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/auth/session',           { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([admin, endUser, session]) => {
       const { found, cookieOnlyBffSession: cookieOnly } = resolveSessionFromAuthTrio(admin, endUser, session);
       setCookieOnlyBffSession(cookieOnly);
       if (found) {
         setSessionUser(found);
+        // Clear any stale consent-decline block — user has a fresh session.
+        setAgentBlockedByConsentDecline(false);
       }
     });
   }, []);
+
+  // P1 — When the BFF returns cookieOnlyBffSession:true, poll /api/auth/session
+  // every 2s for up to 10s. Once the Upstash write has propagated (cookieOnlyBffSession
+  // becomes false) clear the banner and let normal interaction resume.
+  useEffect(() => {
+    if (!cookieOnlyBffSession) {
+      setSessionReconnecting(false);
+      return;
+    }
+    setSessionReconnecting(true);
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5; // 5 × 2s = 10s
+    const interval = setInterval(async () => {
+      attempts += 1;
+      try {
+        const r = await fetch('/api/auth/session', { credentials: 'include', _silent: true });
+        if (r.ok) {
+          const data = await r.json();
+          if (!data.cookieOnlyBffSession) {
+            setCookieOnlyBffSession(false);
+            setSessionReconnecting(false);
+            clearInterval(interval);
+            return;
+          }
+        }
+      } catch (_) { /* non-fatal */ }
+      if (attempts >= MAX_ATTEMPTS) {
+        setSessionReconnecting(false);
+        clearInterval(interval);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [cookieOnlyBffSession]);
 
   /** RFC 6749 refresh — does not log out; retries server-side session tokens. */
   const handleSessionRefresh = useCallback(async () => {
@@ -725,30 +914,34 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     try {
       const r = await refreshOAuthSession();
       if (r.ok) {
-        toast.success('Access token refreshed. You can retry your action.');
+        notifySuccess('Access token refreshed. You can retry your action.');
         checkSelfAuth();
       } else {
-        toast.error('Could not refresh — use Sign in again or reload the page.');
+        notifyError('Could not refresh — use Sign in again or reload the page.');
       }
     } catch (e) {
-      toast.error(e?.message || 'Refresh failed');
+      notifyError(e?.message || 'Refresh failed');
     } finally {
       setSessionRefreshing(false);
     }
   }, [checkSelfAuth]);
 
+
+
   // Check on mount — auto-open if already authenticated (e.g. page refresh after login)
   useEffect(() => {
     Promise.all([
-      fetch('/api/auth/oauth/status',      { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/auth/oauth/user/status', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/auth/session',           { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/auth/oauth/status',      { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/auth/oauth/user/status', { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/auth/session',           { credentials: 'include', _silent: true }).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([admin, endUser, session]) => {
       const { found, cookieOnlyBffSession: cookieOnly } = resolveSessionFromAuthTrio(admin, endUser, session);
       setCookieOnlyBffSession(cookieOnly);
       if (found) {
         setSessionUser(found);
-        const welcome = { id: `${Date.now()}-w`, role: 'assistant', content: welcomeMessage(found) };
+        // Clear any stale consent-decline block from previous sessions.
+        setAgentBlockedByConsentDecline(false);
+        const welcome = { id: `${Date.now()}-w`, role: 'assistant', content: welcomeMessage(found, embeddedFocus, brandShortName) };
         if (cookieOnly) {
           sessionFixBubbleShownRef.current = true;
           setMessages([
@@ -767,7 +960,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isInline]);
+  }, [isInline, embeddedFocus]);
 
   // Re-check when App.js confirms a login, and auto-open the agent
   useEffect(() => {
@@ -775,13 +968,13 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
       checkSelfAuth();
       setMessages(prev =>
         prev.length === 0
-          ? [{ id: Date.now().toString(), role: 'assistant', content: welcomeMessage(user || sessionUserRef.current) }]
+          ? [{ id: Date.now().toString(), role: 'assistant', content: welcomeMessage(user || sessionUserRef.current, embeddedFocus, brandShortName) }]
           : prev
       );
     };
     window.addEventListener('userAuthenticated', onAuth);
     return () => window.removeEventListener('userAuthenticated', onAuth);
-  }, [checkSelfAuth, user, isInline]);
+  }, [checkSelfAuth, user, isInline, embeddedFocus, brandShortName]);
 
   // Re-check when panel opens (catches sessions established after mount)
   useEffect(() => {
@@ -793,10 +986,13 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     if (edu?.panel) setIsOpen(false);
   }, [edu?.panel]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mutual exclusion: close any open education panel when agent opens
+  // Mutual exclusion: close any open education panel when agent opens.
+  // Deps intentionally omit edu?.panel — if edu.panel is included, this effect fires when
+  // the user opens an edu panel (edu.panel null→set), sees isOpen=true (stale render snapshot),
+  // and immediately calls edu.close(), killing the panel before it renders.
   useEffect(() => {
     if (isOpen && edu?.panel) edu.close();
-  }, [isOpen, edu?.panel, edu.close]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check config status from IndexedDB cache whenever panel opens
   useEffect(() => {
@@ -838,10 +1034,12 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     if (!rect) return;
     isDraggingRef.current = true;
     dragOffsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    // Anchor to current pixel position so we can move freely
-    if (!dragPos) setDragPos({ x: rect.left, y: rect.top });
+    // Always anchor to current visual position and exit expanded mode so panelStyle
+    // uses the drag coordinates (isExpanded causes the centered style to win otherwise)
+    setIsExpanded(false);
+    setDragPos({ x: rect.left, y: rect.top });
     e.preventDefault();
-  }, [dragPos]);
+  }, []);
 
   useEffect(() => {
     const onMove = (e) => {
@@ -860,29 +1058,69 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     };
   }, []);
 
-  // Resize handler
+  // Resize handler — works whether the panel is at CSS default position or has been dragged.
+  // Supports all 8 directions: n, ne, e, se, s, sw, w, nw.
+  // N/W/NW/NE/SW directions shift dragPos so the opposite edge stays fixed.
   const handleResize = useCallback((e, direction) => {
     e.preventDefault();
+    e.stopPropagation();
     const startX = e.clientX;
     const startY = e.clientY;
     const startWidth = panelSize.width;
     const startHeight = panelSize.height;
 
-    function onMove(e) {
-      const deltaX = e.clientX - startX;
-      const deltaY = e.clientY - startY;
-      
-      let newWidth = startWidth;
-      let newHeight = startHeight;
+    // Exit expanded mode on resize (same as drag)
+    setIsExpanded(false);
 
-      if (direction.includes('e')) {
-        newWidth = Math.min(450, Math.max(180, startWidth + deltaX));
+    // Capture starting position from current dragPos or from getBoundingClientRect.
+    // Must be done synchronously so onMove calculations are anchored correctly.
+    let startPosX, startPosY;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (dragPos) {
+      startPosX = dragPos.x;
+      startPosY = dragPos.y;
+    } else if (rect) {
+      startPosX = rect.left;
+      startPosY = rect.top;
+      setDragPos({ x: rect.left, y: rect.top });
+    } else {
+      startPosX = 0;
+      startPosY = 0;
+    }
+
+    function onMove(ev) {
+      const deltaX = ev.clientX - startX;
+      const deltaY = ev.clientY - startY;
+      const MIN_W = 280, MIN_H = 220;
+      const MAX_W = Math.floor(window.innerWidth * 0.95);
+      const MAX_H = Math.floor(window.innerHeight * 0.95);
+
+      let newWidth  = startWidth;
+      let newHeight = startHeight;
+      let newX = startPosX;
+      let newY = startPosY;
+
+      // Right edge — grows rightward, position unchanged
+      if (direction === 'e' || direction === 'se' || direction === 'ne') {
+        newWidth = Math.min(MAX_W, Math.max(MIN_W, startWidth + deltaX));
       }
-      if (direction.includes('s')) {
-        newHeight = Math.min(310, Math.max(140, startHeight + deltaY));
+      // Left edge — grows leftward, left position shifts
+      if (direction === 'w' || direction === 'sw' || direction === 'nw') {
+        newWidth = Math.min(MAX_W, Math.max(MIN_W, startWidth - deltaX));
+        newX = startPosX + (startWidth - newWidth);
+      }
+      // Bottom edge — grows downward, position unchanged
+      if (direction === 's' || direction === 'se' || direction === 'sw') {
+        newHeight = Math.min(MAX_H, Math.max(MIN_H, startHeight + deltaY));
+      }
+      // Top edge — grows upward, top position shifts
+      if (direction === 'n' || direction === 'ne' || direction === 'nw') {
+        newHeight = Math.min(MAX_H, Math.max(MIN_H, startHeight - deltaY));
+        newY = startPosY + (startHeight - newHeight);
       }
 
       setPanelSize({ width: newWidth, height: newHeight });
+      setDragPos({ x: newX, y: newY });
     }
 
     function onUp() {
@@ -892,7 +1130,8 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
 
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-  }, [panelSize]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelSize, dragPos]);
 
   // Panel position: override CSS anchoring when user has dragged the window
   // In inline mode the CSS (.ba-mode-inline) handles size — no inline style needed
@@ -903,10 +1142,10 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
           left: '50%',
           top: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 'min(94vw, 320px)',
-          height: 'min(80vh, 260px)',
-          maxWidth: 320,
-          maxHeight: '80vh',
+          width: 'min(94vw, 520px)',
+          height: 'min(85vh, 720px)',
+          maxWidth: 560,
+          maxHeight: '85vh',
           right: 'auto',
           bottom: 'auto',
         }
@@ -937,11 +1176,11 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
         zIndex: 10058,
       };
     }
-    /* Expanded (⊞): agent is centered — anchor results to the left of it (default CSS assumed 260px-wide docked agent). */
+    /* Expanded (⊞): agent is centered — anchor results to the left of it (matches min(94vw, 520px) expanded width). */
     if (isExpanded) {
       return {
         position: 'fixed',
-        left: `max(8px, calc(50vw - min(94vw, 320px) / 2 - ${gap}px - ${rpW}px))`,
+        left: `max(8px, calc(50vw - min(94vw, 520px) / 2 - ${gap}px - ${rpW}px))`,
         top: '50vh',
         transform: 'translateY(-50%)',
         bottom: 'auto',
@@ -974,7 +1213,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
   /** Show overlay then redirect to PingOne login. */
   function handleLoginAction(actionId) {
     const label = actionId === 'login_admin' ? 'Admin' : 'Customer';
-    setLoginOverlay({ show: true, message: `Signing in as ${label}…`, sub: 'Redirecting to PingOne' });
+    spinner.show(`Signing in as ${label}…`, 'Redirecting to PingOne');
     setTimeout(() => _handleLoginActionDirect(actionId), 150);
   }
 
@@ -1066,14 +1305,25 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
         }
         const consent =
           normalized.consent_challenge_required === true || normalized.error === 'consent_challenge_required';
-        addMessage('assistant', formatResult(response.result), actionId);
-        toast.dismiss(toastId);
         if (consent) {
-          toast.info('👤 Amount over $500 — complete consent on the dashboard (human-in-the-loop)', {
-            autoClose: 7000,
-          });
+          const intentPayload = buildConsentIntent(actionId, form);
+          if (!intentPayload) {
+            // Unexpected: consent required but no intent builder for this action.
+            addMessage('assistant', `⚠️ This action requires consent but the transaction details could not be determined. Please use the dashboard to complete it.`, actionId);
+            toast.dismiss(toastId);
+            setLoading(false);
+            return;
+          }
+          addMessage('assistant',
+            `👤 **High-value transaction — your approval is needed.**\n\nTransactions over $${normalized.hitl_threshold_usd ?? 500} require your consent and email verification.\n\nReview the authorization popup, then enter the code sent to your email.`,
+            actionId
+          );
+          toast.dismiss(toastId);
+          setHitlPendingIntent({ actionId, form, intentPayload });
         } else {
-          toast.error(`❌ ${normalized.message || normalized.error || 'Request failed'}`, { autoClose: 5000 });
+          addMessage('assistant', formatResult(response.result), actionId);
+          toast.dismiss(toastId);
+          notifyError(`❌ ${normalized.message || normalized.error || 'Request failed'}`, { autoClose: 5000 });
         }
         setLoading(false);
         return;
@@ -1095,21 +1345,70 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
         const failed    = tokenEvents.find(e => e.id === 'exchange-failed');
         const userTokEv = tokenEvents.find(e => e.id === 'user-token');
 
+        // Build a detailed may_act status string from the user token event
+        const mayActLine = !userTokEv
+          ? '   ⚠️ user token not decoded'
+          : userTokEv.mayActPresent && userTokEv.mayActValid
+            ? `   ✅ may_act valid — ${userTokEv.mayActDetails || 'delegation authorised'}`
+            : userTokEv.mayActPresent && !userTokEv.mayActValid
+              ? `   ❌ may_act mismatch — ${userTokEv.mayActDetails || 'client_id does not match BFF'}`
+              : '   ⚠️ may_act absent from user token';
+
         let tokenMsg = null;
         if (exchanged) {
-          const mayActStatus = userTokEv?.mayActPresent ? '✅ may_act validated' : '⚠️ no may_act';
-          const actStatus    = exchanged.actPresent ? `✅ act: ${exchanged.actDetails}` : '⚠️ no act claim';
-          tokenMsg = `🔐 RFC 8693 Token Exchange\n${mayActStatus} → MCP token issued · ${actStatus}\nScope: ${exchanged.scopeNarrowed || '—'} · Aud: ${exchanged.audienceNarrowed || '—'}`;
-          toast.info(`🔐 Token Exchange complete — MCP token issued (${exchanged.scopeNarrowed || 'scoped'})`, { autoClose: 4500 });
+          const actLine = exchanged.actPresent
+            ? `   ✅ act: ${exchanged.actDetails} — BFF confirmed as current actor`
+            : '   ⚠️ act absent — subject-only exchange (no delegation proof in MCP token; set AGENT_OAUTH_CLIENT_ID)';
+          const audLine = exchanged.audExpected !== undefined
+            ? (exchanged.audMatches
+                ? `   ✅ aud: "${exchanged.audActual ?? exchanged.audienceNarrowed}" — MCP server audience matched (RFC 8707)`
+                : `   ❌ aud mismatch — got "${exchanged.audActual}" expected "${exchanged.audExpected}" — MCP server will reject`)
+            : `   aud: ${exchanged.audienceNarrowed || '—'} (RFC 8707 resource indicator)`;
+          tokenMsg = [
+            '🔐 RFC 8693 Token Exchange complete',
+            mayActLine,
+            actLine,
+            audLine,
+            `   Scope narrowed: ${exchanged.scopeNarrowed || '—'}`,
+            '',
+            'Open Token Chain ↗ to inspect decoded claims.',
+            'aud (audience): which resource server accepts the token — narrowed on exchange.',
+            'may_act (user token) = prospective permission · act (MCP token) = current delegation fact.',
+          ].join('\n');
+          notifyInfo(`🔐 Token Exchange complete — MCP token issued (aud: ${exchanged.audienceNarrowed || 'set'}, scope: ${exchanged.scopeNarrowed || 'narrowed'})`, { autoClose: 4500 });
         } else if (required) {
-          tokenMsg = '🔐 RFC 8693 token exchange is required — set mcp_resource_uri / MCP_RESOURCE_URI (MCP audience). User token is not sent to MCP without exchange.';
-          toast.error('❌ MCP resource URI missing — token exchange required', { autoClose: 6000 });
+          tokenMsg = [
+            '🔐 Token Exchange (RFC 8693): not configured',
+            '   Tools ran via local fallback — the user access token was NOT sent to the MCP server.',
+            '',
+            'To enable full RFC 8693 exchange:',
+            '   1. Create a PingOne Resource Server  audience: "banking_mcp_server"',
+            '   2. Set MCP_RESOURCE_URI=banking_mcp_server  (Config UI or Vercel env)',
+            '   3. Enable Token Exchange grant on the Admin OAuth app in PingOne',
+            '   4. Sign out and sign in again',
+          ].join('\n');
+          // Info-only: tools still work via local fallback
+          // Chat already gets the full RFC 8693 setup explanation via addMessage('token-event').
+          // Suppress the toast — the success toast is already shown and a concurrent info/error
+          // toast would confuse users who just saw "Deposit complete".
         } else if (badScopes) {
-          tokenMsg = `🔐 User token needs more OAuth scopes for MCP exchange (${badScopes.explanation || 'see Token Chain'})`;
-          toast.error('❌ Sign in again with broader scopes (at least 5) for MCP token exchange', { autoClose: 7000 });
+          tokenMsg = [
+            '⚠️ User token has insufficient scopes for RFC 8693 exchange',
+            `   ${badScopes.explanation || 'Need at least 5 OAuth scopes on the user token'}`,
+            '',
+            'Fix: Sign out → sign in again with a PingOne app that requests more scopes',
+            '(openid, profile, email + banking scopes like banking:read, banking:accounts:read).',
+          ].join('\n');
+          notifyError('❌ Sign in again with broader scopes (at least 5) for MCP token exchange', { autoClose: 7000 });
         } else if (failed) {
-          tokenMsg = `🔐 Token Exchange failed: ${failed.error || 'unknown error'}`;
-          toast.error(`❌ Token Exchange failed: ${failed.error || 'unknown error'}`, { autoClose: 6000 });
+          tokenMsg = [
+            `❌ Token Exchange (RFC 8693) failed: ${failed.error || 'unknown error'}`,
+            '',
+            userTokEv?.mayActPresent
+              ? '   may_act was present — check that:\n   • PingOne has Token Exchange grant enabled on the admin OAuth app\n   • Audience policy allows "banking_mcp_server"\n   • may_act.client_id matches the BFF client'
+              : '   may_act was absent — this is likely the cause.\n   Go to /demo-data → Enable may_act → sign out and sign in again.',
+          ].join('\n');
+          notifyError(`❌ Token Exchange failed: ${failed.error || 'unknown error'}`, { autoClose: 6000 });
         }
         if (tokenMsg) {
           addMessage('token-event', tokenMsg, actionId);
@@ -1128,6 +1427,22 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
         } catch {
           // keep write payload for inferAgentResultTypeAndData
         }
+        // Refresh live account balances after write operations so form dropdowns are current
+        fetch('/api/accounts/my', { credentials: 'include', _silent: true })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (!data?.accounts?.length) return;
+            setLiveAccounts(
+              data.accounts.map(a => ({
+                id: a.id,
+                name: a.name || (a.accountType === 'savings' ? 'Savings Account' : 'Checking Account'),
+                type: a.accountType || a.account_type || 'checking',
+                balance: a.balance || 0,
+                accountNumber: a.accountNumber || a.account_number || a.id,
+              }))
+            );
+          })
+          .catch(() => {});
       }
 
       const displayMode = localStorage.getItem('agentDisplayMode') || 'panel';
@@ -1160,6 +1475,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
     } catch (err) {
       markToolProgressOutcome(false);
       toast.dismiss(toastId);
+
       const isConnErr =
         err.message.includes('timed out') ||
         err.message.includes('ECONNREFUSED') ||
@@ -1181,11 +1497,11 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
             /sign in to use the banking agent/i.test(String(err?.message || ''))));
 
       if (isConnErr) {
-        toast.error('🔌 MCP server unreachable — check your server connection', { autoClose: 8000 });
+        notifyError('🔌 MCP server unreachable — check your server connection', { autoClose: 8000 });
       } else if (hydrationAuthFailure && cookieOnlyBffSession) {
         // Inline session-fix banner already shown on load for cookie-only Backend-for-Frontend (BFF); avoid duplicate toasts.
       } else if (err?.code === 'session_not_hydrated') {
-        toast.error(
+        notifyError(
           'Sign in again: server session has no tokens (Vercel needs Redis/Upstash + redeploy, then sign out & sign in).',
           { autoClose: 12000 },
         );
@@ -1194,12 +1510,17 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
         err?.code === 'authentication_required' ||
         /sign in to use the banking agent/i.test(String(err?.message || ''))
       ) {
-        toast.error(
+        notifyError(
           'Session missing or expired on the server. Try Refresh access token, or Sign in again.',
           { autoClose: 9000 },
         );
+      } else if (err?.code === 'agent_consent_required') {
+        // Old server deployment still enforcing startup consent gate.
+        // The consent gate has been removed — sign out and sign in to refresh the session,
+        // or ask the admin to redeploy the latest server code.
+        notifyError('Server configuration: please sign out and sign in again to clear the consent state.', { autoClose: 10000 });
       } else {
-        toast.error(`❌ ${err.message}`, { autoClose: 6000 });
+        notifyError(`❌ ${err.message}`, { autoClose: 6000 });
       }
 
       const authHint =
@@ -1222,6 +1543,12 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
           sessionFixBubbleShownRef.current = true;
           addMessage('error', SESSION_NOT_HYDRATED_CHAT, actionId, { showSessionFixActions: true });
         }
+      } else if (err?.code === 'agent_consent_required') {
+        // Legacy startup consent gate — no longer enforced in current server code.
+        addMessage('assistant',
+          'The server is requesting consent to use the agent, but this gate has been removed in the current version.\n\nPlease **sign out and sign in again** to clear the old session state.',
+          actionId
+        );
       } else {
         addMessage(
           'error',
@@ -1246,7 +1573,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
       return;
     }
     // No form needed for read-only queries
-    if (actionId === 'accounts' || actionId === 'transactions') {
+    if (actionId === 'accounts' || actionId === 'transactions' || actionId === 'mcp_tools') {
       runAction(actionId, {});
     } else {
       setActiveAction(actionId);
@@ -1355,7 +1682,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
   function reportNlFailure(err) {
     if (err?.code === 'session_not_hydrated') {
       if (!cookieOnlyBffSession) {
-        toast.error(
+        notifyError(
           'Sign in again: server session has no tokens (Vercel needs Redis/Upstash + redeploy, then sign out & sign in).',
           { autoClose: 12000 },
         );
@@ -1374,7 +1701,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
         }
         return;
       }
-      toast.error(
+      notifyError(
         'Sign in required — the server has no session for this request. Refresh the page and sign in again.',
         { autoClose: 5000 },
       );
@@ -1384,7 +1711,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
       );
       return;
     }
-    toast.error(`❌ Could not parse request: ${err.message}`, { autoClose: 5000 });
+    notifyError(`❌ Could not parse request: ${err.message}`, { autoClose: 5000 });
     addMessage('assistant', `Could not parse: ${err.message}`);
   }
 
@@ -1470,15 +1797,18 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
   if (!isInline && isAgentPage) return null;
 
   const floatShell = (
-    <>
+    <div
+      className={`banking-agent-float-root${distinctFloatingChrome && !isInline ? ' banking-agent-float-root--distinct' : ''}`}
+      data-agent-ui="floating"
+    >
       {/* FAB - only shown when floating agent is collapsed (not in inline mode) */}
       {!isInline && !isOpen && (
         <button
           type="button"
           className="banking-agent-fab"
           onClick={() => setIsOpen(true)}
-          aria-label="Open AI Banking Agent"
-          title="Open AI Banking Agent"
+          aria-label={`Open ${brandShortName} AI Agent`}
+          title={`Open ${brandShortName} AI Agent`}
         >
           <span className="banking-agent-fab-icon">🏦</span>
           <span className="banking-agent-fab-label">AI Agent</span>
@@ -1497,12 +1827,20 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
       {/* Panel */}
       {effectiveIsOpen && (
         <div
-          className={`banking-agent-panel${isDark ? '' : ' ba-mode-light'}${isExpanded && !isInline ? ' ba-expanded' : ''}${isInline ? ' ba-mode-inline' : ''}${isBottomDock ? ' ba-embedded-bottom-dock' : ''}`}
+          className={`banking-agent-panel${isDark ? '' : ' ba-mode-light'}${isExpanded && !isInline ? ' ba-expanded' : ''}${isInline ? ' ba-mode-inline' : ''}${isBottomDock ? ' ba-embedded-bottom-dock' : ''}${splitChrome ? ' ba-split-column' : ''}`}
           role="dialog"
-          aria-label="Banking AI Agent"
+          aria-label={isConfigEmbeddedFocus ? 'Application setup assistant' : `${brandShortName} AI Agent`}
           ref={panelRef}
           style={panelStyle}
         >
+          {/* P1 — Reconnecting banner: shown while Upstash write is still propagating */}
+          {sessionReconnecting && (
+            <div className="ba-reconnecting" role="status" aria-live="polite">
+              <span className="ba-reconnecting__spinner" aria-hidden="true">⟳</span>
+              Reconnecting to your session…
+            </div>
+          )}
+
           {/* Header — spans full width */}
           {/* In inline mode: no drag handle. In float mode: drag to reposition */}
           <div
@@ -1515,14 +1853,33 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
               <div className="ba-header-left">
                 <span className="ba-status-dot" />
                 <div>
-                  <div className="ba-title">BX Finance AI Agent</div>
+                  <div className="ba-title">
+                    {isConfigEmbeddedFocus
+                      ? 'Application setup assistant'
+                      : splitChrome
+                        ? `${brandShortName} Assistant`
+                        : `${brandShortName} AI Agent`}
+                  </div>
                   <div className="ba-subtitle">
-                    {isLoggedIn
-                      ? `${effectiveUser.firstName || effectiveUser.name?.split(' ')[0] || 'Signed in'} · ${effectiveUser.role === 'admin' ? '👑 Admin' : '👤 Customer'}`
-                      : 'Sign in to get started'}
+                    {isConfigEmbeddedFocus
+                      ? isLoggedIn
+                        ? `PingOne · OAuth · branding (${brandShortName}) · environment variables`
+                        : 'Sign in to get started'
+                      : splitChrome
+                        ? isLoggedIn
+                          ? `${effectiveUser.role === 'admin' ? 'Admin' : 'Customer'} · ${effectiveUser.firstName || effectiveUser.name?.split(' ')[0] || 'Signed in'}`
+                          : 'Sign in to get started'
+                        : isLoggedIn
+                          ? `${effectiveUser.firstName || effectiveUser.name?.split(' ')[0] || 'Signed in'} · ${effectiveUser.role === 'admin' ? '👑 Admin' : '👤 Customer'}`
+                          : 'Sign in to get started'}
                   </div>
                 </div>
               </div>
+              {splitChrome && isLoggedIn && (effectiveUser?.id || effectiveUser?.username) && (
+                <div className="ba-header-session" title="PingOne user id">
+                  {effectiveUser?.id || effectiveUser?.username}
+                </div>
+              )}
               <div className="ba-header-tools">
                 {/* Expand/restore only available in float mode */}
                 {!isInline && (
@@ -1558,6 +1915,15 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
                 >
                   {appTheme === 'dark' ? '☀️' : '🌙'}
                 </button>
+                {splitChrome && isLoggedIn && (
+                  <button
+                    type="button"
+                    className="ba-header-signout"
+                    onClick={() => onLogout?.()}
+                  >
+                    Sign out
+                  </button>
+                )}
                 {/* Collapse to FAB only in float mode */}
                 {!isInline && (
                   <button 
@@ -1572,20 +1938,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
                 )}
               </div>
             </div>
-            {/* Connected services row */}
-            <div className="ba-server-chips">
-              <span className="ba-server-chip ba-server-chip--active" title="Banking AI tools service — connected">
-                <span className="ba-chip-dot" />
-                Banking Tools
-                {mcpStatus.connected && mcpStatus.toolCount != null && (
-                  <span className="ba-chip-count">{mcpStatus.toolCount} actions</span>
-                )}
-              </span>
-              <span className="ba-server-chip ba-server-chip--active" title="PingOne Identity — connected">
-                <span className="ba-chip-dot" />
-                PingOne Identity
-              </span>
-            </div>
+
           </div>
 
           {/* Two-column body */}
@@ -1611,23 +1964,61 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
               </div>
             )}
 
+            {/* High-value transaction consent — shown before OTP (HITL) */}
+            {hitlPendingIntent && (
+              <AgentConsentModal
+                transaction={hitlPendingIntent.intentPayload}
+                onAccept={async () => {
+                  const { actionId, intentPayload } = hitlPendingIntent;
+                  try {
+                    const { data } = await bffAxios.post('/api/transactions/consent-challenge', intentPayload);
+                    const cid = data?.challengeId;
+                    if (!cid) {
+                      notifyError('Could not start consent — no challenge id from server.');
+                      setHitlPendingIntent(null);
+                      return;
+                    }
+                    setHitlPendingIntent(null);
+                    // Pass snapshot from POST response directly — avoids GET race on Vercel
+                    setHitlChallengeId({ challengeId: cid, actionId, snapshot: data.snapshot || null });
+                  } catch (ex) {
+                    const msg = ex.response?.data?.message || ex.response?.data?.error || ex.message || 'Could not start consent flow.';
+                    notifyError(msg);
+                    setHitlPendingIntent(null);
+                  }
+                }}
+                onDismiss={() => setHitlPendingIntent(null)}
+              />
+            )}
+
+            {/* OTP + transaction execution — rendered once challenge is created */}
+            {hitlChallengeId && (
+              <TransactionConsentModal
+                open
+                challengeId={hitlChallengeId.challengeId}
+                preloadedSnapshot={hitlChallengeId.snapshot}
+                user={effectiveUser}
+                autoConfirm
+                onClose={() => setHitlChallengeId(null)}
+                onTransactionSuccess={(msg) => {
+                  const { actionId } = hitlChallengeId;
+                  setHitlChallengeId(null);
+                  addMessage('assistant', `✅ **Transaction approved and completed.**\n\n${msg}`, actionId);
+                  notifySuccess(`✅ ${msg}`);
+                  // Notify UserDashboard to refresh accounts if it happens to be mounted
+                  window.dispatchEvent(new CustomEvent('banking-agent-hitl-confirmed', {
+                    detail: { actionId, successMsg: msg },
+                  }));
+                }}
+                onDeclinedConfirmed={() => {
+                  setHitlChallengeId(null);
+                  notifyInfo('Transaction declined. The AI assistant stays active for read-only actions.');
+                }}
+              />
+            )}
+
             {/* ── Left column: suggestions + actions/auth ── */}
             <div className="ba-left-col">
-              {/* Dashboard navigation button — shown when logged in */}
-              {isLoggedIn && (
-                <button
-                  type="button"
-                  className="ba-left-auth-btn primary"
-                  style={{ marginBottom: 2 }}
-                  onClick={() => {
-                    setIsOpen(false);
-                    navigate(effectiveUser?.role === 'admin' ? '/admin' : '/dashboard');
-                  }}
-                >
-                  {effectiveUser?.role === 'admin' ? '👑 Admin Dashboard' : '📊 My Dashboard'}
-                </button>
-              )}
-
               {isLoggedIn && (
                 <>
                   <div className="ba-left-label">Session</div>
@@ -1653,7 +2044,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
               )}
 
               <div className="ba-left-label">Try asking:</div>
-              {(effectiveUser?.role === 'admin' ? SUGGESTIONS_ADMIN : SUGGESTIONS_CUSTOMER).map(s => (
+              {suggestionList.map(s => (
                 <button
                   key={s}
                   type="button"
@@ -1685,7 +2076,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
               {isLoggedIn ? (
                 <>
                   <div className="ba-left-label">Actions:</div>
-                  {ACTIONS.map(a => (
+                  {actionsList.map(a => (
                     <button
                       key={a.id}
                       type="button"
@@ -1850,6 +2241,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
                     onSubmit={form => runAction(activeAction, form)}
                     onCancel={() => setActiveAction(null)}
                     effectiveUser={effectiveUser}
+                    liveAccounts={liveAccounts}
                   />
                 </div>
               )}
@@ -1879,7 +2271,13 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
                           setShowCommands(false);
                         }
                       }}
-                      placeholder={nlMeta?.groqConfigured ? 'Message BX Finance AI… (Groq AI)' : 'Message BX Finance AI…'}
+                      placeholder={
+                        splitChrome && !nlMeta?.groqConfigured
+                          ? 'Ask about your accounts…'
+                          : nlMeta?.groqConfigured
+                            ? `Message ${brandShortName} AI… (Groq AI)`
+                            : `Message ${brandShortName} AI…`
+                      }
                       disabled={nlLoading || consentBlocked}
                     />
                     <button
@@ -1889,7 +2287,7 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
                       disabled={nlLoading || !nlInput.trim() || consentBlocked}
                       aria-label="Send"
                     >
-                      {nlLoading ? '…' : '↑'}
+                      {nlLoading ? '…' : splitChrome ? 'Send' : '↑'}
                     </button>
                   </div>
                 ) : (
@@ -1898,33 +2296,62 @@ export default function BankingAgent({ user, onLogout, mode = 'float', embeddedD
                   </div>
                 )}
               </div>
+
+              {/* Dashboard navigation button — pinned below prompt */}
+              {isLoggedIn && (
+                <button
+                  type="button"
+                  className="ba-left-auth-btn primary"
+                  style={{ margin: '6px 12px 0', width: 'calc(100% - 24px)', display: 'block' }}
+                  onClick={() => {
+                    setIsOpen(false);
+                    navigate(effectiveUser?.role === 'admin' ? '/admin' : '/dashboard');
+                  }}
+                >
+                  {effectiveUser?.role === 'admin' ? '👑 Admin Dashboard' : '📊 My Dashboard'}
+                </button>
+              )}
+
+              {/* Connected services chips — below prompt */}
+              <div className="ba-chips-footer">
+                <span
+                  className="ba-server-chip ba-server-chip--active"
+                  title={isConfigEmbeddedFocus ? 'MCP tools (same server — use for discovery)' : 'Banking AI tools service — connected'}
+                >
+                  <span className="ba-chip-dot" />
+                  {isConfigEmbeddedFocus ? 'MCP tools' : 'Banking Tools'}
+                  {mcpStatus.connected && mcpStatus.toolCount != null && (
+                    <span className="ba-chip-count">{mcpStatus.toolCount} actions</span>
+                  )}
+                </span>
+                <span className="ba-server-chip ba-server-chip--active" title="PingOne Identity — connected">
+                  <span className="ba-chip-dot" />
+                  PingOne Identity
+                </span>
+              </div>
             </div>
           </div>
-          {/* Resize handles */}
+          {/* Resize handles — all 8 directions, float mode only */}
           {!isInline && (
             <>
               <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--se" onMouseDown={(e) => handleResize(e, 'se')} aria-label="Resize southeast" />
-              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--e" onMouseDown={(e) => handleResize(e, 'e')} aria-label="Resize east" />
-              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--s" onMouseDown={(e) => handleResize(e, 's')} aria-label="Resize south" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--e"  onMouseDown={(e) => handleResize(e, 'e')}  aria-label="Resize east" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--s"  onMouseDown={(e) => handleResize(e, 's')}  aria-label="Resize south" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--n"  onMouseDown={(e) => handleResize(e, 'n')}  aria-label="Resize north" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--ne" onMouseDown={(e) => handleResize(e, 'ne')} aria-label="Resize northeast" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--nw" onMouseDown={(e) => handleResize(e, 'nw')} aria-label="Resize northwest" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--w"  onMouseDown={(e) => handleResize(e, 'w')}  aria-label="Resize west" />
+              <div role="button" tabIndex="0" className="ba-resize-handle ba-resize-handle--sw" onMouseDown={(e) => handleResize(e, 'sw')} aria-label="Resize southwest" />
             </>
           )}
         </div>
       )}
-    </>
-  );
-
-  const overlay = (
-    <LoadingOverlay show={loginOverlay.show} message={loginOverlay.message} sub={loginOverlay.sub} />
+    </div>
   );
 
   // Inline/embed stays in React tree; float mounts on body so position:fixed is never trapped
   // by .App / shell overflow or theme transforms, and works the same on /logs and app routes.
-  if (isInline) return <>{floatShell}{overlay}</>;
-  return (
-    <>
-      {createPortal(floatShell, document.body)}
-      {createPortal(overlay, document.body)}
-    </>
-  );
+  if (isInline) return <>{floatShell}</>;
+  return createPortal(floatShell, document.body);
 }
 

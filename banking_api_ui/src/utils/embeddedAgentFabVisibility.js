@@ -12,23 +12,44 @@ export function isBankingAgentDashboardRoute(pathname) {
 }
 
 /**
- * Whether the global corner FAB floating agent should render.
- *
- * - Floating mode: FAB on all signed-in routes except Demo config (`/demo-data`), which uses an in-page icon only.
- * - Embedded mode: no FAB — assistant only as the bottom dock on `/`, `/admin`, `/dashboard`.
- *
- * @param {{ user?: { role?: string } | null | undefined; agentUiMode: 'floating' | 'embedded'; pathname?: string }} p
+ * Routes where the embedded bottom-dock agent is mounted (dashboard homes + Application Configuration).
+ * Floating FAB still uses {@link isBankingAgentDashboardRoute} only — not `/config`.
+ * @param {string} [pathname]
  * @returns {boolean}
  */
-export function shouldShowGlobalFloatingBankingAgentFab({ user: _user, agentUiMode, pathname = '' }) {
-  const p = (pathname || '').replace(/\/$/, '') || '/';
-  if (p === '/demo-data') return false;
+export function isEmbeddedAgentDockRoute(pathname) {
+  if (pathname == null || typeof pathname !== 'string') return false;
+  const p = pathname.replace(/\/$/, '') || '/';
+  if (p === '/config') return true;
+  return isBankingAgentDashboardRoute(pathname);
+}
 
-  if (agentUiMode === 'floating') return true;
-
-  if (agentUiMode === 'embedded') {
-    return false;
-  }
-
+/**
+ * Routes where the fixed upper-left quick nav (Home, Dashboard, API, Logs) is shown.
+ * Includes admin banking ops so admins can jump back without losing the rail.
+ * @param {string} [pathname]
+ * @param {{ role?: string } | null | undefined} [user]
+ */
+export function isDashboardQuickNavRoute(pathname, user) {
+  if (pathname == null || typeof pathname !== 'string') return false;
+  const p = pathname.replace(/\/$/, '') || '/';
+  if (isBankingAgentDashboardRoute(pathname)) return true;
+  if (user?.role === 'admin' && p === '/admin/banking') return true;
+  // Also show on secondary pages so the nav rail is always accessible while signed in
+  if (p === '/demo-data' || p === '/config' || p === '/mcp-inspector' || p === '/logs' || p === '/activity') return true;
   return false;
+}
+
+/**
+ * Whether the global corner FAB floating agent should render.
+ *
+ * - Float-only (`placement === 'none'`) or Middle/Bottom with **+ FAB** checked.
+ *
+ * @param {{ user?: { role?: string } | null | undefined; placement: 'middle' | 'bottom' | 'none'; fab: boolean; pathname?: string }} p
+ * @returns {boolean}
+ */
+export function shouldShowGlobalFloatingBankingAgentFab({ user, placement, fab, pathname = '' }) {
+  if (!user) return false;
+  if (placement !== 'none' && !fab) return false;
+  return isBankingAgentDashboardRoute(pathname);
 }

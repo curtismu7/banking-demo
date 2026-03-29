@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { toast } from 'react-toastify';
+import apiClient from '../services/apiClient';
+import { notifySuccess, notifyError } from '../utils/appToast';
 import { savePublicConfig, loadPublicConfig } from '../services/configService';
-import { persistBankingAgentUiMode } from '../services/demoScenarioService';
 import { useAgentUiMode } from '../context/AgentUiModeContext';
+import { useIndustryBranding } from '../context/IndustryBrandingContext';
+import { INDUSTRY_PRESETS, DEFAULT_INDUSTRY_ID } from '../config/industryPresets';
+import {
+  AGENT_MCP_SCOPE_CATALOG,
+  DEFAULT_AGENT_MCP_ALLOWED_SCOPES,
+} from '../config/agentMcpScopes';
+import AgentUiModeToggle from './AgentUiModeToggle';
 import McpInspectorSetupWizard from './McpInspectorSetupWizard';
 import '../styles/appShellPages.css';
 import './Config.css';
@@ -58,13 +65,19 @@ const EMPTY_FORM = {
   user_redirect_uri: '',
   admin_role: 'admin',
   user_role: 'customer',
+  admin_username: '',
+  admin_population_id: '',
+  admin_role_claim: '',
   session_secret: '',
   frontend_url: '',
   mcp_server_url: '',           // populated from saved config; not defaulted to localhost
+  mcp_resource_uri: '',         // RFC 8693 MCP audience URI — required for token exchange
   debug_oauth: 'false',
   // PingOne Authorize (in-app authorization policy gate)
   authorize_enabled: 'false',
-  authorize_policy_id: '',
+  authorize_decision_endpoint_id: '', // Phase 2 — preferred path
+  authorize_mcp_decision_endpoint_id: '', // MCP first-tool gate (DecisionContext=McpFirstTool)
+  authorize_policy_id: '',            // Phase 1 — legacy fallback
   authorize_worker_client_id: '',
   authorize_worker_client_secret: '',
   // Step-up authentication for large transfers / withdrawals
@@ -73,6 +86,10 @@ const EMPTY_FORM = {
   step_up_method: 'ciba',
   // Whether the CIBA feature is enabled globally (also surfaces in CIBA panel)
   ciba_enabled: 'false',
+  /** Industry / white-label UI preset (server + IndustryBrandingContext). */
+  ui_industry_preset: DEFAULT_INDUSTRY_ID,
+  /** OAuth scopes the BFF may request for the agent MCP token (RFC 8693) — space-separated. */
+  agent_mcp_allowed_scopes: DEFAULT_AGENT_MCP_ALLOWED_SCOPES,
 };
 
 // ─── Helper: secret field wrapper ────────────────────────────────────────────
@@ -216,81 +233,29 @@ function DisplayPreferences() {
 }
 
 function AgentLayoutPreferences() {
-  const { mode, setMode } = useAgentUiMode();
-
-  async function handleModeChange(next) {
-    if (next === mode) return;
-    setMode(next);
-    const saved = await persistBankingAgentUiMode(next);
-    if (!saved) {
-      toast.warn(
-        'Agent layout could not be saved on the server yet. It stays on this browser; refresh may revert if the server still has the old value.',
-        { autoClose: 4500 }
-      );
-    }
-    toast.info('Applying agent layout…', { autoClose: 1200 });
-    window.setTimeout(() => {
-      // Embedded dock only mounts on dashboard home routes; staying on /config after
-      // reload looks "broken" (settings show embedded but only the FAB appears).
-      if (next === 'embedded') {
-        window.location.href = '/';
-      } else {
-        window.location.reload();
-      }
-    }, 350);
-  }
+  const { placement } = useAgentUiMode();
 
   return (
     <CollapsibleCard
       title="AI Agent layout"
-      subtitle="Choose floating widget or dashboard-embedded chat (only one is active)"
+      subtitle="Middle column, bottom dock, or float — optional + FAB"
       defaultOpen={true}
       className="config-page__agent-layout"
     >
       <p style={{ fontSize: '0.85rem', color: '#6b7280', marginBottom: '1rem' }}>
-        Controls whether the banking agent appears as a <strong>floating</strong> panel (FAB) or is <strong>embedded</strong>
-        into your dashboard home page. Tool steps (e.g. read/update account, transactions) show in the chat as actions run.
-        Choosing <strong>embedded</strong> sends you to <strong>Home</strong> so the bottom strip appears right away; choosing <strong>floating</strong> reloads this page.
-        When signed in, your choice is saved with your demo profile so refresh and new devices pick it up from the server.
+        <strong>Middle</strong> uses the split dashboard (token | assistant | banking). <strong>Bottom</strong> uses the
+        full-width dock on home and config (Classic layout). <strong>Float</strong> is the corner FAB only.{' '}
+        <strong>+ FAB</strong> adds the floating panel on top of Middle or Bottom (never Middle and Bottom together).
+        When signed in, your choice syncs to your demo profile.
       </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
-          <input
-            type="radio"
-            name="bankingAgentUiMode"
-            value="floating"
-            checked={mode === 'floating'}
-            onChange={() => handleModeChange('floating')}
-            style={{ marginTop: '3px', flexShrink: 0 }}
-          />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Floating (default)</div>
-            <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
-              FAB in the corner — open/close over any page. Use this when you want the agent on every screen.
-            </div>
-          </div>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
-          <input
-            type="radio"
-            name="bankingAgentUiMode"
-            value="embedded"
-            checked={mode === 'embedded'}
-            onChange={() => handleModeChange('embedded')}
-            style={{ marginTop: '3px', flexShrink: 0 }}
-          />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Embedded in dashboard</div>
-            <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
-              Chat appears as a <strong>full-width bar along the bottom</strong> of the customer or admin <strong>home</strong> dashboard — no floating widget while you are signed in.
-              Other routes (e.g. MCP Inspector) do not include the embedded panel.
-            </div>
-          </div>
-        </label>
-      </div>
-      {mode === 'embedded' && (
+      <AgentUiModeToggle variant="config" />
+      <p style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '1rem', lineHeight: 1.5 }}>
+        <strong>Bottom</strong> sends you to <strong>Home</strong> after apply so the dock mounts. <strong>Middle</strong>{' '}
+        reloads with split view.
+      </p>
+      {placement === 'bottom' && (
         <div style={{ marginTop: '12px', padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '0.8rem', color: '#1d4ed8' }}>
-          Embedded mode: go to <strong>Home</strong> or <strong>My Dashboard</strong> to use the agent. The sign-in experience still uses the floating agent when you are not logged in.
+          Bottom dock: open <strong>Home</strong> or <strong>My Dashboard</strong> to use the agent. The marketing home page still uses the floating agent when you are not signed in.
         </div>
       )}
     </CollapsibleCard>
@@ -299,6 +264,7 @@ function AgentLayoutPreferences() {
 
 export default function Config() {
   const navigate = useNavigate();
+  const { applyIndustryId } = useIndustryBranding();
   const [form, setForm]               = useState(EMPTY_FORM);
   const [secretMeta, setSecretMeta]   = useState({});   // { <key>_set: bool }
   const [showSecret, setShowSecret]   = useState({});   // { key: bool }
@@ -391,8 +357,8 @@ export default function Config() {
   };
 
   function showToast(type, msg) {
-    if (type === 'success') toast.success(msg);
-    else toast.error(msg);
+    if (type === 'success') notifySuccess(msg);
+    else notifyError(msg);
   }
 
   // Build auth headers for config write requests (hosted: password header)
@@ -429,6 +395,8 @@ export default function Config() {
       // Persist public fields to IndexedDB
       await savePublicConfig(form);
 
+      applyIndustryId(form.ui_industry_preset || DEFAULT_INDUSTRY_ID);
+
       showToast('success', 'Configuration saved! Redirecting to sign in…');
       setTimeout(() => navigate('/', { state: { scrollToAgent: true } }), 1500);
     } catch (err) {
@@ -444,7 +412,7 @@ export default function Config() {
     setTestResult(null);
     try {
       // Send the current form values so the test works before saving
-      const { data } = await axios.post('/api/admin/config/test', {
+      const { data } = await apiClient.post('/api/admin/config/test', {
         pingone_environment_id: form.pingone_environment_id,
         pingone_region:         form.pingone_region,
         admin_client_id:        form.admin_client_id,
@@ -488,6 +456,7 @@ export default function Config() {
               <span className="config-page__badge config-page__badge--warn">⚠ Not configured</span>
             )}
             <Link to="/onboarding" className="app-page-shell__btn app-page-shell__btn--solid">Setup guide</Link>
+            <Link to="/setup/pingone" className="app-page-shell__btn">PingOne reference</Link>
             <Link to="/" className="app-page-shell__btn">← Back to app</Link>
           </div>
         </div>
@@ -544,7 +513,7 @@ export default function Config() {
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                   <code className="config-page__code-block">{redirectInfo.adminRedirectUri}</code>
                   <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }}
-                    onClick={() => { navigator.clipboard.writeText(redirectInfo.adminRedirectUri); toast.success('Admin redirect URI copied'); }}>
+                    onClick={() => { navigator.clipboard.writeText(redirectInfo.adminRedirectUri); notifySuccess('Admin redirect URI copied'); }}>
                     Copy
                   </button>
                 </div>
@@ -554,12 +523,53 @@ export default function Config() {
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                   <code className="config-page__code-block">{redirectInfo.userRedirectUri}</code>
                   <button type="button" className="btn btn-secondary" style={{ fontSize: '0.8rem' }}
-                    onClick={() => { navigator.clipboard.writeText(redirectInfo.userRedirectUri); toast.success('Customer redirect URI copied'); }}>
+                    onClick={() => { navigator.clipboard.writeText(redirectInfo.userRedirectUri); notifySuccess('Customer redirect URI copied'); }}>
                     Copy
                   </button>
                 </div>
               </div>
             </div>
+            {Array.isArray(redirectInfo.referenceRedirectSets) && redirectInfo.referenceRedirectSets.length > 0 && (
+              <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.35)', borderRadius: 8, border: '1px solid rgba(15,23,42,0.12)' }}>
+                <p style={{ margin: '0 0 0.65rem', fontSize: '0.875rem', fontWeight: 600 }}>
+                  Reference: localhost + api.pingdeme.org (add every host you use in PingOne)
+                </p>
+                {redirectInfo.referenceRedirectSets.map((row) => (
+                  <div key={row.id} style={{ marginBottom: '0.85rem' }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{row.label}</div>
+                    {row.hint && <p style={{ margin: '0 0 0.35rem', fontSize: '0.78rem', color: '#475569' }}>{row.hint}</p>}
+                    <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.78rem' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+                        <span style={{ minWidth: '7rem', color: '#64748b' }}>Admin</span>
+                        <code className="config-page__code-block" style={{ flex: '1 1 200px' }}>{row.adminRedirectUri}</code>
+                        <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem' }}
+                          onClick={() => { navigator.clipboard.writeText(row.adminRedirectUri); notifySuccess('Copied'); }}>
+                          Copy
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+                        <span style={{ minWidth: '7rem', color: '#64748b' }}>Customer</span>
+                        <code className="config-page__code-block" style={{ flex: '1 1 200px' }}>{row.userRedirectUri}</code>
+                        <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem' }}
+                          onClick={() => { navigator.clipboard.writeText(row.userRedirectUri); notifySuccess('Copied'); }}>
+                          Copy
+                        </button>
+                      </div>
+                      {row.postLogoutExample && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+                          <span style={{ minWidth: '7rem', color: '#64748b' }}>Sign off</span>
+                          <code className="config-page__code-block" style={{ flex: '1 1 200px' }}>{row.postLogoutExample}</code>
+                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem' }}
+                            onClick={() => { navigator.clipboard.writeText(row.postLogoutExample); notifySuccess('Copied'); }}>
+                            Copy
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {redirectInfo.canonicalOrigin && (
               <p className="config-page__redirect-foot">
                 Canonical origin: <code>{redirectInfo.canonicalOrigin}</code>
@@ -626,6 +636,99 @@ export default function Config() {
         )}
 
         <form id="config-main-form" onSubmit={handleSave}>
+
+          <CollapsibleCard
+            title="Industry & branding"
+            subtitle="White-label colors and logo — stored with configuration (public field)"
+            className="config-page__card--industry"
+          >
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem', lineHeight: 1.5 }}>
+              Choose a preset to change primary button colors, dashboard header gradient, and the logo shown across the app.
+              The setup assistant on this page can explain these options. Save configuration to apply everywhere.
+            </p>
+            <div className="config-page__industry-grid">
+              {INDUSTRY_PRESETS.map((p) => (
+                <label
+                  key={p.id}
+                  className={`config-page__industry-option${form.ui_industry_preset === p.id ? ' config-page__industry-option--active' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="ui_industry_preset"
+                    value={p.id}
+                    checked={form.ui_industry_preset === p.id}
+                    onChange={() => handleChange('ui_industry_preset', p.id)}
+                    disabled={readOnly}
+                    style={{ marginTop: '0.35rem', flexShrink: 0 }}
+                  />
+                  <span className="config-page__industry-option-body">
+                    <img src={p.logoPath} alt="" className="config-page__industry-logo" height={40} width={40} />
+                    <span className="config-page__industry-titles">
+                      <span className="config-page__industry-name">{p.shortName}</span>
+                      <span className="config-page__industry-desc">{p.description}</span>
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </CollapsibleCard>
+
+          <CollapsibleCard
+            title="Agent MCP scopes"
+            subtitle="Limit which capabilities the AI agent can use after RFC 8693 token exchange"
+            className="config-page__card--agent-scopes"
+            defaultOpen={false}
+          >
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem', lineHeight: 1.5 }}>
+              Each scope maps to PingOne OAuth scopes on the delegated MCP token. Unchecking <strong>Transfers &amp; movement</strong>{' '}
+              removes <code>banking:transactions:write</code> (the transfer scope) so the agent cannot move money — read-only demos.
+              Save configuration to apply; the next tool call runs a new token exchange with the selected scopes.
+            </p>
+            <div className="config-page__agent-scope-list">
+              {AGENT_MCP_SCOPE_CATALOG.map((row) => {
+                const raw = String(form.agent_mcp_allowed_scopes || '').trim();
+                const selected = raw
+                  ? new Set(raw.split(/\s+/).filter(Boolean))
+                  : new Set(AGENT_MCP_SCOPE_CATALOG.map((c) => c.scope));
+                const checked = selected.has(row.scope);
+                return (
+                  <label
+                    key={row.scope}
+                    className={`config-page__agent-scope-row${checked ? ' config-page__agent-scope-row--on' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={readOnly}
+                      onChange={(e) => {
+                        const eff = new Set(
+                          String(form.agent_mcp_allowed_scopes || '').trim()
+                            ? form.agent_mcp_allowed_scopes.split(/\s+/).filter(Boolean)
+                            : AGENT_MCP_SCOPE_CATALOG.map((c) => c.scope)
+                        );
+                        if (e.target.checked) {
+                          eff.add(row.scope);
+                        } else {
+                          eff.delete(row.scope);
+                          if (eff.size === 0) {
+                            notifyError('Select at least one Agent MCP scope.');
+                            return;
+                          }
+                        }
+                        handleChange('agent_mcp_allowed_scopes', [...eff].join(' '));
+                      }}
+                      style={{ marginTop: '0.2rem', flexShrink: 0 }}
+                    />
+                    <span className="config-page__agent-scope-body">
+                      <span className="config-page__agent-scope-label">{row.label}</span>
+                      <code className="config-page__agent-scope-code">{row.scope}</code>
+                      <span className="config-page__agent-scope-desc">{row.description}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </CollapsibleCard>
 
           {/* ── Section 1: PingOne Environment ── */}
           <CollapsibleCard
@@ -828,6 +931,35 @@ export default function Config() {
                 placeholder="customer"
                 disabled={readOnly}
               />
+              <TextField
+                label="Admin Population ID (PingOne)"
+                fieldKey="admin_population_id"
+                value={form.admin_population_id}
+                onChange={handleChange}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                helpText="ID of the PingOne population (e.g. bankAdmins) whose members receive admin role. Map population.id into your app's attribute contract in PingOne — no schema changes needed."
+                disabled={readOnly}
+              />
+              <TextField
+                label="Admin Role Claim (custom PingOne attribute)"
+                fieldKey="admin_role_claim"
+                value={form.admin_role_claim}
+                onChange={handleChange}
+                placeholder="bankingRole"
+                helpText="Name of a custom PingOne userinfo claim to inspect. Its value must match the Admin Role name above."
+                disabled={readOnly}
+              />
+              <div className="config-page__grid-span-2">
+                <TextField
+                  label="Admin usernames — permanent allowlist (comma-separated)"
+                  fieldKey="admin_username"
+                  value={form.admin_username}
+                  onChange={handleChange}
+                  placeholder="bankadmin, bankuser"
+                  helpText="preferred_username values that always get admin, regardless of PingOne claims. Use for service/test accounts."
+                  disabled={readOnly}
+                />
+              </div>
               <div className="config-page__grid-span-2">
                 <SecretField
                   label="Session Secret"
@@ -911,12 +1043,30 @@ export default function Config() {
                 </p>
               </div>
               <TextField
-                label="Policy Decision Point ID"
+                label="Decision Endpoint ID (Phase 2 — preferred)"
+                fieldKey="authorize_decision_endpoint_id"
+                value={form.authorize_decision_endpoint_id}
+                onChange={handleChange}
+                placeholder="e.g. 87554d55-a7cf-…"
+                help="Endpoint ID from PingOne Authorize → Decision Endpoints. When set, uses the current Decision Endpoints API (POST /decisionEndpoints/{id}). Takes priority over Policy Decision Point ID below."
+                disabled={readOnly}
+              />
+              <TextField
+                label="MCP first-tool Decision Endpoint ID (optional)"
+                fieldKey="authorize_mcp_decision_endpoint_id"
+                value={form.authorize_mcp_decision_endpoint_id}
+                onChange={handleChange}
+                placeholder="Separate endpoint for MCP delegation policy"
+                help="When **Feature flag: Authorize — First MCP tool** is ON and Simulated Authorize is OFF, the BFF POSTs Trust Framework parameters with **DecisionContext=McpFirstTool**, **UserId**, **ToolName**, **TokenAudience**, **ActClientId**, **NestedActClientId**, **McpResourceUri**. Create this decision endpoint and matching policy in PingOne Authorize."
+                disabled={readOnly}
+              />
+              <TextField
+                label="Policy Decision Point ID (Phase 1 — legacy fallback)"
                 fieldKey="authorize_policy_id"
                 value={form.authorize_policy_id}
                 onChange={handleChange}
                 placeholder="e.g. abc12345-…"
-                help="The PDP ID from PingOne Authorize → Policy Decision Points."
+                help="Legacy PDP ID. Used only when Decision Endpoint ID above is not set. From PingOne Authorize → Policy Decision Points."
                 disabled={readOnly}
               />
             </div>
@@ -993,6 +1143,15 @@ export default function Config() {
                 help={storageType === 'vercel-kv'
                   ? '⚠️ This URL is only reachable when running locally. On Replit/Vercel, clear this field.'
                   : 'URL of the banking LangChain agent (WebSocket). Local only — not reachable from hosted cloud.'}
+                disabled={readOnly}
+              />
+              <TextField
+                label="MCP Resource URI (RFC 8693 audience)"
+                fieldKey="mcp_resource_uri"
+                value={form.mcp_resource_uri}
+                onChange={handleChange}
+                placeholder="https://mcp.example.com or urn:pingone:mcp"
+                help="Required for RFC 8693 token exchange. The audience (aud) the exchanged MCP token will be scoped to. Must match the Resource registered in PingOne. Also set via MCP_SERVER_RESOURCE_URI env var."
                 disabled={readOnly}
               />
               <div>

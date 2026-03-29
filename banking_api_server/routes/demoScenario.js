@@ -6,16 +6,53 @@
 'use strict';
 
 const express = require('express');
+const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const dataStore = require('../data/store');
 const runtimeSettings = require('../config/runtimeSettings');
 const demoScenarioStore = require('../services/demoScenarioStore');
 const accountsRouter = require('./accounts');
+const { getManagementToken } = require('../services/pingOneClientService');
+const configStore = require('../services/configStore');
 
 const router = express.Router();
 
 const DEFAULT_STEP_UP = () => runtimeSettings.get('stepUpAmountThreshold');
 const BLOCKED_USER_FIELDS = new Set(['id', 'password', 'createdAt']);
+
+/** Legacy `both` in KV → floating (embedded and floating FAB are mutually exclusive in the UI). */
+function normalizeBankingAgentUiMode(stored) {
+  if (stored === 'embedded' || stored === 'floating' || stored === 'both') return stored;
+  return null;
+}
+
+/** @param {unknown} stored */
+function normalizeBankingAgentUi(stored) {
+  if (!stored || typeof stored !== 'object') return null;
+  const p = stored.placement;
+  const fab = Boolean(stored.fab);
+  if (p !== 'middle' && p !== 'bottom' && p !== 'none') return null;
+  if (p === 'none' && !fab) return { placement: 'none', fab: true };
+  return { placement: p, fab };
+}
+
+function effectiveBankingAgentUi(scenario) {
+  const direct = normalizeBankingAgentUi(scenario.bankingAgentUi);
+  if (direct) return direct;
+  const legacy = normalizeBankingAgentUiMode(scenario.bankingAgentUiMode);
+  if (legacy === 'embedded') return { placement: 'bottom', fab: false };
+  if (legacy === 'both') return { placement: 'bottom', fab: true };
+  if (legacy === 'floating') return { placement: 'none', fab: true };
+  return { placement: 'none', fab: true };
+}
+
+function legacyModeFromUi(ui) {
+  if (ui.placement === 'none') return 'floating';
+  if (ui.placement === 'bottom' && !ui.fab) return 'embedded';
+  if (ui.placement === 'bottom' && ui.fab) return 'both';
+  if (ui.placement === 'middle' && !ui.fab) return 'embedded';
+  return 'both';
+}
 
 /** Shown in Demo config UI only when DB + session have no profile strings (never overwrites real data). */
 const PROFILE_UI_FALLBACK = Object.freeze({
@@ -33,6 +70,54 @@ function isBlank(v) {
 function isExistingAccountId(id) {
   if (id == null) return false;
   return String(id).trim().length > 0;
+}
+
+/**
+ * Persist a snapshot of the user's current accounts to demoScenarioStore (Redis/KV).
+ * Called after any PUT that modifies accounts so cold-start restarts can recover them.
+ */
+async function saveAccountSnapshot(userId) {
+  const accounts = dataStore.getAccountsByUserId(userId);
+  const snapshot = accounts.map(a => ({
+    id: a.id,
+    accountType: a.accountType,
+    accountNumber: a.accountNumber,
+    name: a.name || '',
+    balance: a.balance,
+    currency: a.currency || 'USD',
+    isActive: a.isActive !== false,
+  }));
+  await demoScenarioStore.save(userId, { accountSnapshot: snapshot });
+}
+
+/**
+ * On cold-start, the in-memory dataStore loses all accounts.  Rebuild them from
+ * the last snapshot stored in demoScenarioStore (Redis/KV).
+ * Returns the restored accounts array, or [] if no snapshot is available.
+ */
+async function restoreAccountsFromSnapshot(userId) {
+  try {
+    const scenario = await demoScenarioStore.load(userId);
+    if (!Array.isArray(scenario.accountSnapshot) || scenario.accountSnapshot.length === 0) return [];
+    const restored = [];
+    for (const snap of scenario.accountSnapshot) {
+      const existing = dataStore.getAccountById(snap.id);
+      if (existing) {
+        restored.push(existing);
+      } else {
+        const acct = await dataStore.createAccount({
+          ...snap,
+          userId,
+          createdAt: new Date(),
+        });
+        restored.push(acct);
+      }
+    }
+    return restored;
+  } catch (e) {
+    console.warn('[demoScenario] restoreAccountsFromSnapshot failed:', e.message);
+    return [];
+  }
 }
 
 /** Allowed account types from the Demo config UI (new rows). */
@@ -152,16 +237,20 @@ function sanitizeUserUpdates(raw) {
 router.get('/', async (req, res) => {
   try {
     let accounts = dataStore.getAccountsByUserId(req.user.id);
-    if (accounts.length === 0 && req.user.id && typeof accountsRouter.provisionDemoAccounts === 'function') {
-      accounts = await accountsRouter.provisionDemoAccounts(req.user.id);
+    if (accounts.length === 0 && req.user.id) {
+      // Try restoring persisted snapshot (Redis/KV) before provisioning fresh defaults.
+      accounts = await restoreAccountsFromSnapshot(req.user.id);
+      if (accounts.length === 0 && typeof accountsRouter.provisionDemoAccounts === 'function') {
+        accounts = await accountsRouter.provisionDemoAccounts(req.user.id);
+        // Persist the freshly provisioned accounts so future cold-starts can restore them.
+        await saveAccountSnapshot(req.user.id);
+      }
     }
     const scenario = await demoScenarioStore.load(req.user.id);
     const currentUser = dataStore.getUserById(req.user.id) || {};
     const userData = buildUserDataForDemoResponse(req, currentUser);
-    const bankingAgentUiMode =
-      scenario.bankingAgentUiMode === 'embedded' || scenario.bankingAgentUiMode === 'floating'
-        ? scenario.bankingAgentUiMode
-        : null;
+    const bankingAgentUi = effectiveBankingAgentUi(scenario);
+    const bankingAgentUiMode = legacyModeFromUi(bankingAgentUi);
     res.json({
       accounts: accounts.map(a => ({
         id: a.id,
@@ -176,6 +265,7 @@ router.get('/', async (req, res) => {
           scenario.stepUpAmountThreshold != null ? scenario.stepUpAmountThreshold : DEFAULT_STEP_UP(),
         stepUpAmountThresholdIsDefault: scenario.stepUpAmountThreshold == null,
         bankingAgentUiMode,
+        bankingAgentUi,
       },
       defaults: {
         stepUpAmountThreshold: DEFAULT_STEP_UP(),
@@ -226,12 +316,31 @@ router.put('/', async (req, res) => {
       const raw = req.body.bankingAgentUiMode;
       if (raw === null || raw === '') {
         await demoScenarioStore.save(uid, { bankingAgentUiMode: null });
-      } else if (raw === 'embedded' || raw === 'floating') {
+      } else if (raw === 'embedded' || raw === 'floating' || raw === 'both') {
         await demoScenarioStore.save(uid, { bankingAgentUiMode: raw });
       } else {
         return res.status(400).json({
           error: 'invalid_banking_agent_ui_mode',
-          message: 'bankingAgentUiMode must be embedded, floating, or null.',
+          message: 'bankingAgentUiMode must be embedded, floating, both, or null.',
+        });
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'bankingAgentUi')) {
+      const raw = req.body.bankingAgentUi;
+      if (raw === null || raw === '') {
+        await demoScenarioStore.save(uid, { bankingAgentUi: null });
+      } else {
+        const ui = normalizeBankingAgentUi(raw);
+        if (!ui) {
+          return res.status(400).json({
+            error: 'invalid_banking_agent_ui',
+            message: 'bankingAgentUi must be { placement: middle|bottom|none, fab: boolean } or null.',
+          });
+        }
+        await demoScenarioStore.save(uid, {
+          bankingAgentUi: ui,
+          bankingAgentUiMode: legacyModeFromUi(ui),
         });
       }
     }
@@ -253,8 +362,26 @@ router.put('/', async (req, res) => {
         if (!row || typeof row !== 'object') continue;
 
         if (!isExistingAccountId(row.id)) {
-          // New account — create it regardless of whether existing accounts are stale
+          // New account — but first check if one already exists for this type (upsert by type).
           const accountType = normalizeDemoAccountType(row.accountType);
+          const existingOfType = existingForUser.find(a => a.accountType === accountType);
+          if (existingOfType) {
+            // Treat as an update of the existing account instead of creating a duplicate.
+            const updates = {};
+            if (typeof row.name === 'string') updates.name = row.name.trim().slice(0, 120);
+            if (row.balance !== undefined && row.balance !== null) {
+              const b = parseFloat(row.balance);
+              if (!Number.isFinite(b) || b < 0 || b > 99_999_999) {
+                return res.status(400).json({ error: 'invalid_balance', message: 'Balance must be a valid non-negative number.' });
+              }
+              updates.balance = Math.round(b * 100) / 100;
+            }
+            if (Object.keys(updates).length > 0) {
+              await dataStore.updateAccount(existingOfType.id, updates);
+            }
+            continue;
+          }
+          // No existing account for this type — create it.
           let name = typeof row.name === 'string' ? row.name.trim().slice(0, 120) : '';
           if (!name) {
             name = DEMO_DEFAULT_ACCOUNT_NAMES[accountType] || 'Account';
@@ -344,13 +471,13 @@ router.put('/', async (req, res) => {
     }
 
     const accounts = dataStore.getAccountsByUserId(uid);
+    // Persist account snapshot to Redis/KV so cold-start restarts (Vercel, etc.) can recover all accounts.
+    await saveAccountSnapshot(uid);
     const scenario = await demoScenarioStore.load(uid);
     const currentUser = dataStore.getUserById(uid) || {};
     const { password: _password, ...savedUserData } = currentUser;
-    const bankingAgentUiModeOut =
-      scenario.bankingAgentUiMode === 'embedded' || scenario.bankingAgentUiMode === 'floating'
-        ? scenario.bankingAgentUiMode
-        : null;
+    const bankingAgentUiOut = effectiveBankingAgentUi(scenario);
+    const bankingAgentUiModeOut = legacyModeFromUi(bankingAgentUiOut);
     res.json({
       ok: true,
       staleAccountIds: staleAccountIds?.length ? staleAccountIds : undefined,
@@ -366,6 +493,7 @@ router.put('/', async (req, res) => {
         stepUpAmountThreshold:
           scenario.stepUpAmountThreshold != null ? scenario.stepUpAmountThreshold : DEFAULT_STEP_UP(),
         bankingAgentUiMode: bankingAgentUiModeOut,
+        bankingAgentUi: bankingAgentUiOut,
       },
       userData: savedUserData,
     });
@@ -376,3 +504,83 @@ router.put('/', async (req, res) => {
 });
 
 module.exports = router;
+
+// ── may_act demo helper ────────────────────────────────────────────────────────
+// Re-exported so server.js can mount at /api/demo/may-act (no auth middleware
+// duplication — server.js wraps everything under authenticateToken already).
+
+/**
+ * PATCH /api/demo/may-act
+ * Body: { enabled: boolean }
+ *
+ * Sets or clears the `mayAct` custom attribute on the signed-in PingOne user.
+ * When enabled:  mayAct = { "client_id": "<admin_client_id>" }
+ * When disabled: mayAct set to null / empty object so PingOne omits may_act from tokens.
+ *
+ * The user must re-login after this change for their token to reflect the new may_act value.
+ */
+async function patchMayAct(req, res) {
+  const enabled = req.body?.enabled !== false; // default true
+  const pingOneUserId = req.user?.id;
+  if (!pingOneUserId) {
+    return res.status(401).json({ error: 'unauthenticated', message: 'No user session' });
+  }
+
+  const envId = configStore.getEffective('pingone_environment_id');
+  const region = configStore.getEffective('pingone_region') || 'com';
+  const bffClientId = configStore.getEffective('admin_client_id');
+
+  if (!envId || !bffClientId) {
+    return res.status(503).json({
+      error: 'not_configured',
+      message: 'pingone_environment_id or admin_client_id not set — cannot update user attribute',
+    });
+  }
+
+  let token;
+  try {
+    token = await getManagementToken();
+  } catch (err) {
+    return res.status(503).json({
+      error: 'management_token_failed',
+      message: `Could not obtain PingOne management token: ${err.message}`,
+    });
+  }
+
+  const url = `https://api.pingone.${region}/v1/environments/${envId}/users/${pingOneUserId}`;
+  // PingOne custom attributes live under the schema extension namespace.
+  // We use a PATCH with the top-level attribute name (no namespace needed for
+  // attributes added via Schema → User Schema in the admin console).
+  const patchBody = {
+    mayAct: enabled ? { client_id: bffClientId } : null,
+  };
+
+  try {
+    await axios.patch(url, patchBody, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 12000,
+    });
+    console.log(`[DemoMayAct] ${enabled ? 'Set' : 'Cleared'} mayAct for user ${pingOneUserId}`);
+    return res.json({
+      ok: true,
+      enabled,
+      mayAct: enabled ? { client_id: bffClientId } : null,
+      message: enabled
+        ? `may_act set to {"client_id":"${bffClientId}"}. Re-login to see the updated token.`
+        : 'may_act cleared. Re-login to see token without may_act.',
+    });
+  } catch (err) {
+    const status = err.response?.status;
+    const detail = err.response?.data?.message || err.response?.data?.details?.[0]?.message || err.message;
+    console.error(`[DemoMayAct] PingOne PATCH failed (${status}):`, detail);
+    return res.status(status || 502).json({
+      error: 'pingone_patch_failed',
+      message: `PingOne returned ${status}: ${detail}`,
+    });
+  }
+}
+
+module.exports.patchMayAct = patchMayAct;
