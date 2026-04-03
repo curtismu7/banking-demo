@@ -1,0 +1,67 @@
+---
+description: BX Finance UI quality rules — enforce before any UI change
+globs: ["banking_api_ui/src/components/**/*.js", "banking_api_ui/src/components/**/*.jsx", "banking_api_ui/src/**/*.css"]
+alwaysApply: false
+---
+
+# BX Finance UI Quality Rules
+
+Before modifying any UI file in `banking_api_ui/src/`, run:
+
+```bash
+npm run test:e2e:score
+```
+
+This prints a 100-point score. Your changes must not lower it.
+
+## Protected CSS classes — do not rename or remove
+
+These classes are referenced by Playwright tests and have caused regressions when renamed.
+
+### Token Chain Display
+- `.tcd-root` — root container (whole component will disappear if removed)
+- `.tcd-header-title` — must contain "Token Chain"
+- `.tcd-tabs`, `.tcd-tab` — tabs "Current call" and "History"
+- `.tcd-badge` — status badges (Active/Acquired/Exchanged/Failed)
+- `.tcd-legend`, `.tcd-legend-item`
+- `.token-info-btn` — dashboard button that opens the token modal
+
+### Banking Agent
+- `.banking-agent-fab` — floating action button (must show 🏦 icon)
+- `.banking-agent-panel` — the panel itself
+- `.ba-title` — must contain "BX Finance AI Agent"
+- `.ba-left-col`, `.ba-right-col` — two-column layout
+- `.ba-action-item` — action buttons (8 required: 🏦📋💰⬇⬆↔🔧🚪)
+- `.ba-server-chip` — connected services chips
+- `.banking-agent-messages` — chat message area
+- `.ba-input`, `.ba-send-btn`
+
+### Customer Dashboard
+- `.user-dashboard` — root (used by all dashboard tests)
+- `.accounts-grid`, `.account-card`, `.account-type-badge`, `.balance`
+- `.transactions-table`, `.transaction-row`
+- `.transaction-date`, `.transaction-type`, `.transaction-amount`, `.transaction-description`
+- `.interface-indicator`, `.interface-icon`
+- `.logout-btn` — must be visible and non-overlapping with FAB
+- `.deposit-btn`, `.withdraw-btn`, `.select-account-btn`
+
+### Landing Page
+- `.brand-name` — must contain "BX Finance"
+- `.feature-card` — 6 required
+- `.step` — 3 required
+
+## Data formatting rules (never regress these)
+
+- **Currency**: always `$1,500.00` format — never raw `1500` or `1500.0`
+- **Dates**: always human-readable — never ISO 8601 `2026-03-01T10:00:00.000Z`
+- **Errors**: friendly messages only — never stack traces (`at Object.`) visible in UI
+- **Toasts**: max 1 per page load — check `.Toastify__toast` count
+
+## After finishing UI changes
+
+```bash
+npm run test:e2e:quality   # all 22 quality checks must pass
+npm run test:e2e:score     # score must be ≥ 85 for a healthy UI
+```
+
+The full criteria are in `docs/ui-quality-criteria.md`.

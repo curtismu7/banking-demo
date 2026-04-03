@@ -47,5 +47,52 @@ if [ "$CHANGED" -eq 1 ]; then
   echo ""
 fi
 
-# Always exit 0 — warn only, never block.
+# ── UI Quality Gate (BLOCKING) ───────────────────────────────────────────────
+# Runs the Playwright quality suite when banking_api_ui/src/ files are staged.
+# Exits 1 to block the commit if any check fails.
+UI_STAGED=$(echo "$STAGED" | grep "banking_api_ui/src/")
+
+if [ -n "$UI_STAGED" ]; then
+  echo ""
+  echo -e "${CYAN}🏦 UI files staged — running quality gate...${RESET}"
+  echo -e "${CYAN}   (skip with: git commit --no-verify)${RESET}"
+  echo ""
+
+  UI_DIR="$(git rev-parse --show-toplevel)/banking_api_ui"
+  SERVER_STARTED=0
+
+  # Start CRA dev server if not already running
+  if ! curl -sf http://127.0.0.1:3000 >/dev/null 2>&1; then
+    echo "  Starting CRA dev server (one-time, ~30s)..."
+    BROWSER=none PORT=3000 HOST=127.0.0.1 HTTPS=false npm --prefix "$UI_DIR" start \
+      > /tmp/bxf-cra-hook.log 2>&1 &
+    CRA_PID=$!
+    SERVER_STARTED=1
+    for i in $(seq 1 40); do
+      curl -sf http://127.0.0.1:3000 >/dev/null 2>&1 && break
+      sleep 3
+    done
+  fi
+
+  PLAYWRIGHT_SKIP_WEBSERVER=1 npx --prefix "$UI_DIR" playwright test \
+    tests/e2e/ui-quality.spec.js --reporter=list
+  UI_RESULT=$?
+
+  if [ "$SERVER_STARTED" = "1" ]; then
+    kill "$CRA_PID" 2>/dev/null || true
+  fi
+
+  if [ "$UI_RESULT" -ne 0 ]; then
+    echo ""
+    echo -e "${YELLOW}❌ UI quality checks failed — commit blocked.${RESET}"
+    echo -e "${CYAN}   Run: npm run test:e2e:score   for a full score breakdown.${RESET}"
+    echo -e "${CYAN}   Docs: docs/ui-quality-criteria.md${RESET}"
+    echo ""
+    exit 1
+  fi
+
+  echo -e "${CYAN}✅ UI quality gate passed.${RESET}"
+  echo ""
+fi
+
 exit 0

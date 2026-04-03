@@ -57,3 +57,52 @@ jobs:
         run: npm test -- --watchAll=false --passWithNoTests --forceExit
         env:
           CI: 'true'
+
+  e2e-quality:
+    name: UI Quality Evaluator (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: banking_api_ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: banking_api_ui
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: banking_api_ui
+        run: npx playwright install chromium --with-deps
+
+      # Start CRA dev server in the background. Playwright's webServer config cannot
+      # reliably manage react-scripts start in CI (exits code 1 before webpack compiles).
+      # We start it explicitly, wait for it, then tell Playwright to skip webServer.
+      - name: Start CRA dev server
+        working-directory: banking_api_ui
+        run: BROWSER=none PORT=3000 HOST=127.0.0.1 HTTPS=false npm start &
+
+      - name: Wait for dev server to be ready
+        working-directory: banking_api_ui
+        run: npx wait-on tcp:127.0.0.1:3000 --timeout 300000
+
+      - name: Run UI quality evaluator
+        working-directory: banking_api_ui
+        run: npm run test:e2e:quality
+        env:
+          CI: 'true'
+          # Server is already running above; skip Playwright's webServer logic.
+          PLAYWRIGHT_SKIP_WEBSERVER: '1'
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-quality-report
+          path: banking_api_ui/playwright-report/
+          retention-days: 7

@@ -36,11 +36,15 @@
     "test:e2e:agent": "playwright test tests/e2e/banking-agent.spec.js --reporter=list",
     "test:e2e:customer": "playwright test tests/e2e/customer-dashboard.spec.js --reporter=list",
     "test:e2e:landing": "playwright test tests/e2e/landing-marketing.spec.js --reporter=list",
-    "test:e2e:ui:smoke": "playwright test tests/e2e/customer-dashboard.spec.js tests/e2e/landing-marketing.spec.js --reporter=list"
+    "test:e2e:ui:smoke": "playwright test tests/e2e/customer-dashboard.spec.js tests/e2e/landing-marketing.spec.js --reporter=list",
+    "test:e2e:quality": "playwright test tests/e2e/ui-quality.spec.js --reporter=list",
+    "test:e2e:score": "playwright test tests/e2e/ui-score.spec.js --reporter=list"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@playwright/test": "^1.44.0",
-    "@resvg/resvg-js": "^2.6.2"
+    "@resvg/resvg-js": "^2.6.2",
+    "wait-on": "^9.0.4"
   },
   "eslintConfig": {
     "extends": [
